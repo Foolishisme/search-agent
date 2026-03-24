@@ -302,6 +302,12 @@
             gap: 18px;
         }
 
+        .message-sources {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--line);
+        }
+
         .artifact-shell {
             border-top: 1px solid var(--line);
             padding-top: 18px;
@@ -918,22 +924,19 @@
                     <p id="status" class="meta composer-status"></p>
                     <p id="error" class="error"></p>
                 </div>
-                <div class="composer-tools">
-                    <button id="cancel-run" class="secondary hidden" type="button">停止</button>
-                    <button id="submit">发送问题</button>
-                </div>
+                <button id="submit">发送问题</button>
             </div>
         </div>
     </div>
 
     <script>
         const submitButton = document.getElementById('submit');
-        const cancelRunButton = document.getElementById('cancel-run');
         const newSessionButton = document.getElementById('new-session');
         const deleteSessionButton = document.getElementById('delete-session');
         const attachTrigger = document.getElementById('attach-trigger');
         const fileInput = document.getElementById('file-input');
         const questionInput = document.getElementById('question');
+        const liveAnswerCardElement = document.querySelector('.answer-card');
         const answerElement = document.getElementById('answer');
         const sourcesElement = document.getElementById('sources');
         const sourcesListElement = document.getElementById('sources-list');
@@ -948,10 +951,12 @@
         const errorElement = document.getElementById('error');
         const conversationElement = document.getElementById('conversation');
         const sessionListElement = document.getElementById('session-list');
+        const sessionToolbarCardElement = document.querySelector('.session-toolbar-card');
         const sessionMetaElement = document.getElementById('session-meta');
         const sessionAttachmentsElement = document.getElementById('session-attachments');
         const pendingAttachmentsElement = document.getElementById('pending-attachments');
         const canvasUsedTag = document.getElementById('canvas-used-tag');
+        const artifactShellElement = document.querySelector('.artifact-shell');
         const createArtifactButton = document.getElementById('create-artifact');
         const artifactPanelElement = document.getElementById('artifact-panel');
         const artifactListElement = document.getElementById('artifact-list');
@@ -970,9 +975,11 @@
         let currentSessionTitle = '新会话';
         let pendingFiles = [];
         let latestAnswerMarkdown = '';
+        let latestSearchResults = [];
         let currentArtifactId = null;
         let currentArtifacts = [];
         let isArtifactDirty = false;
+        let isRunActive = false;
         let activeRunId = null;
         let activeRunBaseSessionId = null;
 
@@ -991,17 +998,39 @@
         }
 
         function beginActiveRun(baseSessionId) {
+            isRunActive = true;
             activeRunId = null;
             activeRunBaseSessionId = baseSessionId;
-            cancelRunButton.classList.remove('hidden');
-            cancelRunButton.disabled = false;
+            submitButton.textContent = '中断';
+            submitButton.disabled = false;
         }
 
         function finishActiveRun() {
+            isRunActive = false;
             activeRunId = null;
             activeRunBaseSessionId = null;
-            cancelRunButton.classList.add('hidden');
-            cancelRunButton.disabled = false;
+            submitButton.textContent = '发送问题';
+            submitButton.disabled = false;
+        }
+
+        async function requestCancelRun() {
+            if (!activeRunId) {
+                return;
+            }
+            submitButton.textContent = '停止中...';
+            submitButton.disabled = true;
+            statusElement.textContent = '正在停止当前执行...';
+            try {
+                const response = await fetch(`/api/runs/${activeRunId}/cancel`, { method: 'POST' });
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || '停止执行失败');
+                }
+            } catch (error) {
+                errorElement.textContent = error.message || '停止执行失败';
+                submitButton.textContent = '中断';
+                submitButton.disabled = false;
+            }
         }
 
         function setCanvasUsed(toolObservations) {
@@ -1145,13 +1174,14 @@
         }
 
         function resetRoundOutput() {
+            latestSearchResults = [];
             answerElement.innerHTML = '<p class="placeholder">等待提问...</p>';
+            hideLiveAnswer();
             sourcesElement.hidden = true;
             sourcesElement.open = false;
             sourcesListElement.innerHTML = '';
             sourcesCountTextElement.textContent = '0 条来源';
             renderLogs([]);
-            renderResults([]);
             statusElement.textContent = '';
             errorElement.textContent = '';
             setCanvasUsed([]);
@@ -1163,6 +1193,7 @@
             questionInput.value = '';
             pendingFiles = [];
             latestAnswerMarkdown = '';
+            latestSearchResults = [];
             currentArtifacts = [];
             conversationElement.innerHTML = '<div class="placeholder">还没有对话记录，发送第一条消息后会自动创建会话。</div>';
             resetRoundOutput();
@@ -1264,14 +1295,82 @@
             sourcesElement.open = false;
         }
 
-        function renderConversation(messages) {
+        function buildSourcesBlock(results) {
+            const wrapper = document.createElement('details');
+            wrapper.className = 'source-block message-sources';
+
+            const summary = document.createElement('summary');
+            summary.className = 'source-toggle';
+            summary.innerHTML = `
+                <div class="source-toggle-copy">
+                    <span class="source-toggle-title">引用来源</span>
+                    <span class="meta">${results.length} 条来源</span>
+                </div>
+                <span class="source-toggle-hint">点开查看</span>
+            `;
+            wrapper.appendChild(summary);
+
+            const shell = document.createElement('div');
+            shell.className = 'source-list-shell';
+            const list = document.createElement('div');
+            list.className = 'source-list';
+            results.forEach((result, index) => {
+                const item = document.createElement('details');
+                item.className = 'source-item';
+
+                const titleRow = document.createElement('summary');
+                titleRow.className = 'source-item-toggle';
+                titleRow.innerHTML = `
+                    <span class="source-index">${index + 1}</span>
+                    <span class="source-title">${escapeHtml(result.title || '未命名来源')}</span>
+                `;
+                item.appendChild(titleRow);
+
+                const body = document.createElement('div');
+                body.className = 'source-item-body';
+                body.appendChild(buildExpandableText(result.snippet || '暂无摘要', 'source-snippet'));
+
+                const meta = document.createElement('div');
+                meta.className = 'meta';
+                const link = document.createElement('a');
+                link.href = result.url || '#';
+                link.target = '_blank';
+                link.rel = 'noreferrer';
+                link.textContent = result.url || '无链接';
+                meta.appendChild(link);
+                body.appendChild(meta);
+                item.appendChild(body);
+                list.appendChild(item);
+            });
+            shell.appendChild(list);
+            wrapper.appendChild(shell);
+            return wrapper;
+        }
+
+        function showLiveAnswer() {
+            liveAnswerCardElement.classList.remove('hidden');
+        }
+
+        function hideLiveAnswer() {
+            liveAnswerCardElement.classList.add('hidden');
+        }
+
+        function renderConversation(messages, latestResults = []) {
             conversationElement.innerHTML = '';
             if (!messages.length) {
                 conversationElement.innerHTML = '<div class="placeholder">当前会话为空。</div>';
                 return;
             }
 
-            messages.forEach((message) => {
+            let latestAssistantIndex = -1;
+            for (let index = messages.length - 1; index >= 0; index -= 1) {
+                if (messages[index].role === 'assistant') {
+                    latestAssistantIndex = index;
+                    break;
+                }
+            }
+
+            messages.forEach((message, index) => {
                 const item = document.createElement('div');
                 item.className = `message ${message.role}`;
                 const renderedContent = message.role === 'assistant'
@@ -1284,8 +1383,23 @@
                     </div>
                     ${renderedContent}
                 `;
+                if (message.role === 'assistant' && index === latestAssistantIndex && latestResults.length) {
+                    item.appendChild(buildSourcesBlock(latestResults));
+                }
                 conversationElement.appendChild(item);
             });
+        }
+
+        function initializeConversationLayout() {
+            if (artifactShellElement && sessionToolbarCardElement && artifactShellElement.parentElement !== sessionToolbarCardElement) {
+                sessionToolbarCardElement.appendChild(artifactShellElement);
+            }
+            sourcesElement.classList.add('hidden');
+            hideLiveAnswer();
+            const resultsCard = resultsPanel.closest('.side-card');
+            if (resultsCard) {
+                resultsCard.classList.add('hidden');
+            }
         }
 
         async function loadSessions() {
@@ -1394,14 +1508,11 @@
                 latestAnswerMarkdown = data.messages?.length
                     ? String(data.messages[data.messages.length - 1].content || '')
                     : '';
+                latestSearchResults = data.latest_search_results || [];
                 setSessionMeta();
-                renderConversation(data.messages || []);
-                answerElement.innerHTML = data.messages?.length
-                    ? renderMarkdown(data.messages[data.messages.length - 1].content)
-                    : '<p class="placeholder">等待提问...</p>';
+                renderConversation(data.messages || [], latestSearchResults);
+                hideLiveAnswer();
                 renderLogs(data.latest_logs || []);
-                renderResults(data.latest_search_results || []);
-                renderSources(data.latest_search_results || []);
                 renderSessionAttachments(data.attachments || []);
                 setCanvasUsed(data.latest_tool_observations || []);
                 await loadArtifacts(data.session_id);
@@ -1441,12 +1552,11 @@
 
             submitButton.disabled = true;
             beginActiveRun(baseSessionId);
+            showLiveAnswer();
             statusElement.textContent = '执行中...';
             answerElement.innerHTML = '<p class="placeholder">处理中...</p>';
-            sourcesElement.hidden = true;
-            sourcesListElement.innerHTML = '';
+            latestSearchResults = [];
             renderLogs([]);
-            renderResults([]);
 
             try {
                 const formData = new FormData();
@@ -1507,11 +1617,7 @@
                             liveToolObservations.push(event.result);
                             setCanvasUsed(liveToolObservations);
                         } else if (event.type === 'results') {
-                            renderResults(event.results || []);
-                            renderSources(event.results || []);
-                            if ((event.results || []).length) {
-                                resultsPanel.open = true;
-                            }
+                            latestSearchResults = event.results || [];
                         } else if (event.type === 'attachments') {
                             renderSessionAttachments(event.attachments || []);
                         } else if (event.type === 'final') {
@@ -1519,12 +1625,11 @@
                             currentSessionId = data.session_id;
                             currentSessionTitle = data.session_title;
                             latestAnswerMarkdown = data.answer || '';
+                            latestSearchResults = data.search_results || [];
                             setSessionMeta();
-                            answerElement.innerHTML = renderMarkdown(data.answer);
-                            renderConversation(data.conversation || []);
+                            renderConversation(data.conversation || [], latestSearchResults);
+                            hideLiveAnswer();
                             renderLogs(data.logs || []);
-                            renderResults(data.search_results || []);
-                            renderSources(data.search_results || []);
                             renderSessionAttachments(data.attachments || []);
                             setCanvasUsed(data.tool_observations || []);
                             statusElement.textContent = data.need_search
@@ -1551,6 +1656,7 @@
                 }
             } catch (error) {
                 answerElement.innerHTML = '<p class="placeholder">请求失败</p>';
+                hideLiveAnswer();
                 errorElement.textContent = error.message || '发生未知错误';
                 finishActiveRun();
             } finally {
@@ -1558,23 +1664,12 @@
             }
         }
 
-        submitButton.addEventListener('click', handleSubmit);
-        cancelRunButton.addEventListener('click', async () => {
-            if (!activeRunId) {
+        submitButton.addEventListener('click', async () => {
+            if (isRunActive) {
+                await requestCancelRun();
                 return;
             }
-            cancelRunButton.disabled = true;
-            statusElement.textContent = '正在停止当前执行...';
-            try {
-                const response = await fetch(`/api/runs/${activeRunId}/cancel`, { method: 'POST' });
-                if (!response.ok) {
-                    const data = await response.json();
-                    throw new Error(data.detail || '停止执行失败');
-                }
-            } catch (error) {
-                errorElement.textContent = error.message || '停止执行失败';
-                cancelRunButton.disabled = false;
-            }
+            await handleSubmit();
         });
 
         newSessionButton.addEventListener('click', startNewSession);
@@ -1598,6 +1693,10 @@
         questionInput.addEventListener('keydown', (event) => {
             if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
                 event.preventDefault();
+                if (isRunActive) {
+                    requestCancelRun();
+                    return;
+                }
                 handleSubmit();
             }
         });
@@ -1669,9 +1768,9 @@
             }
         });
 
+        initializeConversationLayout();
         startNewSession();
         renderLogs([]);
-        renderResults([]);
         renderPendingFiles();
         loadSessions();
     </script>

@@ -38,12 +38,11 @@ class ApiTests(unittest.TestCase):
         self.assertIn("引用来源", response.text)
         self.assertIn('class="floating-composer"', response.text)
         self.assertIn('id="logs-panel"', response.text)
-        self.assertIn('id="results-panel"', response.text)
         self.assertIn('id="create-artifact"', response.text)
         self.assertIn('id="artifact-panel"', response.text)
         self.assertIn('id="download-artifact"', response.text)
         self.assertIn('id="sources-count-text"', response.text)
-        self.assertIn('id="cancel-run"', response.text)
+        self.assertIn(">发送问题<", response.text)
         self.assertIn("Canvas Tool", response.text)
 
     def test_favicon(self):
