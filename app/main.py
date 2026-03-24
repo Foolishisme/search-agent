@@ -51,7 +51,15 @@ async def ask(request: AskRequest) -> AskResponse:
             request.question,
             conversation=existing_session.messages if existing_session else [],
         )
-        session = session_store.append_turn(request.session_id, request.question, response.answer)
+        session = session_store.append_turn(
+            request.session_id,
+            request.question,
+            response.answer,
+            need_search=response.need_search,
+            query=response.query,
+            logs=response.logs,
+            search_results=response.search_results,
+        )
         response.session_id = session.session_id
         response.session_title = session.title
         response.conversation = session.messages

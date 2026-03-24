@@ -4,17 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>最小搜索 Agent</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
     <style>
         :root {
-            --bg: #09111f;
-            --panel: #101a2c;
-            --panel-alt: #0c1628;
-            --line: #243247;
-            --text: #e6eefb;
-            --muted: #8ea2c6;
-            --accent: #4f8cff;
-            --accent-soft: rgba(79, 140, 255, 0.18);
-            --danger: #ef6b73;
+            --bg: #f4f1ea;
+            --panel: rgba(255, 255, 255, 0.9);
+            --panel-alt: #fcfaf6;
+            --line: #ddd3c4;
+            --text: #1f2937;
+            --muted: #6b7280;
+            --accent: #2f6fed;
+            --accent-soft: rgba(47, 111, 237, 0.08);
+            --danger: #c94b53;
+            --surface-strong: #f5ede2;
+            --quote-bg: #f3efe7;
         }
 
         * {
@@ -25,8 +29,8 @@
             margin: 0;
             font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
             background:
-                radial-gradient(circle at top left, rgba(79, 140, 255, 0.18), transparent 24%),
-                linear-gradient(180deg, #0b1322 0%, #09111f 100%);
+                radial-gradient(circle at top left, rgba(255, 199, 120, 0.32), transparent 24%),
+                linear-gradient(180deg, #fbf8f2 0%, #f4f1ea 100%);
             color: var(--text);
         }
 
@@ -35,6 +39,7 @@
             display: flex;
             gap: 24px;
             padding: 24px;
+            padding-bottom: 220px;
         }
 
         .sidebar {
@@ -48,11 +53,11 @@
         }
 
         .panel {
-            background: rgba(16, 26, 44, 0.92);
+            background: var(--panel);
             border: 1px solid var(--line);
             border-radius: 20px;
             backdrop-filter: blur(10px);
-            box-shadow: 0 18px 50px rgba(2, 8, 20, 0.32);
+            box-shadow: 0 18px 50px rgba(120, 96, 62, 0.1);
         }
 
         .sidebar-panel {
@@ -67,7 +72,9 @@
 
         .main-grid {
             display: grid;
+            grid-template-columns: minmax(0, 1fr) 320px;
             gap: 20px;
+            align-items: start;
         }
 
         .card {
@@ -81,6 +88,21 @@
             align-items: center;
             justify-content: space-between;
             gap: 12px;
+        }
+
+        .session-toolbar-card {
+            grid-column: 1 / span 2;
+        }
+
+        .conversation-card,
+        .answer-card {
+            grid-column: 1;
+        }
+
+        .side-card {
+            grid-column: 2;
+            padding: 0;
+            overflow: hidden;
         }
 
         h1,
@@ -131,7 +153,7 @@
 
         .session-item.active {
             border-color: var(--accent);
-            background: linear-gradient(180deg, var(--accent-soft), rgba(12, 22, 40, 0.95));
+            background: linear-gradient(180deg, var(--accent-soft), #fffdfa);
         }
 
         .session-item:hover {
@@ -166,7 +188,7 @@
             padding: 16px;
             border-radius: 16px;
             border: 1px solid var(--line);
-            background: #08101d;
+            background: #fffdfa;
             color: var(--text);
             font: inherit;
         }
@@ -183,14 +205,14 @@
 
         button.secondary {
             color: var(--text);
-            background: transparent;
+            background: rgba(255, 255, 255, 0.72);
             border: 1px solid var(--line);
         }
 
         button.danger {
-            background: rgba(239, 107, 115, 0.16);
-            color: #ffc8cc;
-            border: 1px solid rgba(239, 107, 115, 0.32);
+            background: rgba(201, 75, 83, 0.08);
+            color: #9b1c24;
+            border: 1px solid rgba(201, 75, 83, 0.2);
         }
 
         button.small {
@@ -204,7 +226,6 @@
             cursor: not-allowed;
         }
 
-        .answer,
         .message-content,
         .log-item,
         .result-item {
@@ -226,8 +247,8 @@
         }
 
         .message.user {
-            border-color: rgba(79, 140, 255, 0.42);
-            background: rgba(79, 140, 255, 0.08);
+            border-color: rgba(47, 111, 237, 0.25);
+            background: rgba(47, 111, 237, 0.06);
         }
 
         .message-role {
@@ -247,6 +268,185 @@
             border: 1px solid var(--line);
         }
 
+        .answer-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .answer-markdown,
+        .markdown-content {
+            color: var(--text);
+            line-height: 1.8;
+            font-size: 16px;
+        }
+
+        .answer-markdown h1,
+        .answer-markdown h2,
+        .answer-markdown h3,
+        .answer-markdown h4,
+        .markdown-content h1,
+        .markdown-content h2,
+        .markdown-content h3,
+        .markdown-content h4 {
+            margin: 1.1em 0 0.5em;
+            line-height: 1.35;
+        }
+
+        .answer-markdown h1:first-child,
+        .answer-markdown h2:first-child,
+        .answer-markdown h3:first-child,
+        .markdown-content h1:first-child,
+        .markdown-content h2:first-child,
+        .markdown-content h3:first-child {
+            margin-top: 0;
+        }
+
+        .answer-markdown p,
+        .answer-markdown ul,
+        .answer-markdown ol,
+        .answer-markdown blockquote,
+        .markdown-content p,
+        .markdown-content ul,
+        .markdown-content ol,
+        .markdown-content blockquote {
+            margin: 0.8em 0;
+        }
+
+        .answer-markdown ul,
+        .answer-markdown ol,
+        .markdown-content ul,
+        .markdown-content ol {
+            padding-left: 1.4em;
+        }
+
+        .answer-markdown li + li,
+        .markdown-content li + li {
+            margin-top: 0.35em;
+        }
+
+        .answer-markdown strong,
+        .markdown-content strong {
+            color: #111827;
+        }
+
+        .answer-markdown code,
+        .markdown-content code {
+            padding: 0.12em 0.4em;
+            border-radius: 8px;
+            background: var(--surface-strong);
+            font-size: 0.92em;
+        }
+
+        .answer-markdown pre,
+        .markdown-content pre {
+            overflow-x: auto;
+            padding: 16px;
+            border-radius: 16px;
+            background: #f7f1e8;
+            border: 1px solid #e5dac8;
+        }
+
+        .answer-markdown pre code,
+        .markdown-content pre code {
+            padding: 0;
+            background: transparent;
+        }
+
+        .answer-markdown blockquote,
+        .markdown-content blockquote {
+            padding: 14px 16px;
+            border-left: 4px solid #d2a66f;
+            background: var(--quote-bg);
+            border-radius: 0 14px 14px 0;
+            color: #4b5563;
+        }
+
+        .answer-markdown hr,
+        .markdown-content hr {
+            border: 0;
+            border-top: 1px solid var(--line);
+            margin: 1.2em 0;
+        }
+
+        .source-block {
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            background: linear-gradient(180deg, #fffdfa 0%, #fbf7f1 100%);
+            padding: 18px;
+        }
+
+        .source-block-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .source-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .source-item {
+            border: 1px solid #e8dece;
+            border-radius: 14px;
+            background: white;
+            padding: 14px 16px;
+        }
+
+        .source-index {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            margin-right: 8px;
+            border-radius: 999px;
+            background: #eef4ff;
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .source-title {
+            font-weight: 700;
+            color: #111827;
+        }
+
+        .source-snippet {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.7;
+        }
+
+        .clamped-text {
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+        }
+
+        .clamped-text.expanded {
+            display: block;
+            -webkit-line-clamp: unset;
+            line-clamp: unset;
+        }
+
+        .text-toggle {
+            margin-top: 8px;
+            padding: 0;
+            border: 0;
+            background: transparent;
+            color: var(--accent);
+            font-size: 13px;
+            cursor: pointer;
+        }
+
         .stack {
             display: flex;
             flex-direction: column;
@@ -254,12 +454,84 @@
         }
 
         .error {
-            color: #ffb7bc;
-            margin-top: 12px;
+            color: #b42318;
+            margin-top: 8px;
+            font-size: 13px;
         }
 
         a {
-            color: #8bb6ff;
+            color: var(--accent);
+        }
+
+        .panel-toggle {
+            cursor: pointer;
+            list-style: none;
+            padding: 18px 20px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .panel-toggle::-webkit-details-marker {
+            display: none;
+        }
+
+        .panel-toggle-count {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 24px;
+            height: 24px;
+            padding: 0 8px;
+            border-radius: 999px;
+            background: #eef4ff;
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .panel-body {
+            padding: 0 20px 20px;
+            border-top: 1px solid var(--line);
+        }
+
+        .floating-composer {
+            position: fixed;
+            left: 50%;
+            bottom: 20px;
+            transform: translateX(-50%);
+            width: min(860px, calc(100vw - 380px));
+            z-index: 30;
+        }
+
+        .composer-shell {
+            padding: 16px 18px 14px;
+            border-radius: 28px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: 0 24px 60px rgba(120, 96, 62, 0.16);
+            backdrop-filter: blur(18px);
+        }
+
+        .composer-shell textarea {
+            width: 100%;
+            min-height: 92px;
+            resize: vertical;
+            margin-top: 0;
+            padding: 0;
+            border: 0;
+            background: transparent;
+            outline: none;
+        }
+
+        .composer-status {
+            min-height: 20px;
+        }
+
+        .hidden {
+            display: none !important;
         }
 
         @media (max-width: 960px) {
@@ -277,6 +549,22 @@
 
             .session-list {
                 max-height: none;
+            }
+
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .session-toolbar-card,
+            .conversation-card,
+            .answer-card,
+            .side-card {
+                grid-column: 1;
+            }
+
+            .floating-composer {
+                width: calc(100vw - 24px);
+                bottom: 12px;
             }
         }
     </style>
@@ -300,7 +588,7 @@
 
         <main class="main">
             <div class="main-grid">
-                <section class="panel card">
+                <section class="panel card session-toolbar-card">
                     <div class="session-toolbar">
                         <div>
                             <h1>最小搜索 Agent MVP</h1>
@@ -308,37 +596,69 @@
                         </div>
                         <button id="delete-session" class="danger" disabled>删除记忆</button>
                     </div>
-                    <textarea id="question" placeholder="例如：帮我查一下最近 AI Agent runtime 的趋势"></textarea>
-                    <div class="composer-actions">
-                        <button id="submit">发送问题</button>
-                        <p id="status" class="meta"></p>
-                    </div>
-                    <p id="error" class="error"></p>
                 </section>
 
-                <section class="panel card">
+                <section class="panel card conversation-card">
                     <h2>当前会话内容</h2>
                     <div id="conversation" class="conversation">
                         <div class="placeholder">还没有对话记录，发送第一条消息后会自动创建会话。</div>
                     </div>
                 </section>
 
-                <section class="panel card">
+                <section class="panel card answer-card">
                     <h2>本轮答案</h2>
-                    <div id="answer" class="answer">等待提问...</div>
+                    <div class="answer-shell">
+                        <div id="answer" class="answer-markdown">
+                            <p class="placeholder">等待提问...</p>
+                        </div>
+                        <div id="sources" class="source-block" hidden>
+                            <div class="source-block-header">
+                                <h3>引用来源</h3>
+                                <p class="meta">根据本轮搜索结果生成</p>
+                            </div>
+                            <div id="sources-list" class="source-list"></div>
+                        </div>
+                    </div>
                 </section>
 
-                <section class="panel card">
-                    <h2>执行日志</h2>
-                    <div id="logs" class="stack"></div>
+                <section class="panel side-card">
+                    <details id="logs-panel">
+                        <summary class="panel-toggle">
+                            <span>执行日志</span>
+                            <span id="logs-count" class="panel-toggle-count">0</span>
+                        </summary>
+                        <div class="panel-body">
+                            <div id="logs" class="stack"></div>
+                        </div>
+                    </details>
                 </section>
 
-                <section class="panel card">
-                    <h2>搜索结果</h2>
-                    <div id="results" class="stack"></div>
+                <section class="panel side-card">
+                    <details id="results-panel">
+                        <summary class="panel-toggle">
+                            <span>搜索结果</span>
+                            <span id="results-count" class="panel-toggle-count">0</span>
+                        </summary>
+                        <div class="panel-body">
+                            <div id="results" class="stack"></div>
+                        </div>
+                    </details>
                 </section>
             </div>
         </main>
+    </div>
+
+    <div class="floating-composer">
+        <div class="composer-shell">
+            <textarea id="question" placeholder="Ask anything"></textarea>
+            <div class="composer-actions">
+                <div>
+                    <p id="status" class="meta composer-status"></p>
+                    <p id="error" class="error"></p>
+                </div>
+                <button id="submit">发送问题</button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -347,8 +667,14 @@
         const deleteSessionButton = document.getElementById('delete-session');
         const questionInput = document.getElementById('question');
         const answerElement = document.getElementById('answer');
+        const sourcesElement = document.getElementById('sources');
+        const sourcesListElement = document.getElementById('sources-list');
         const logsElement = document.getElementById('logs');
         const resultsElement = document.getElementById('results');
+        const logsCountElement = document.getElementById('logs-count');
+        const resultsCountElement = document.getElementById('results-count');
+        const logsPanel = document.getElementById('logs-panel');
+        const resultsPanel = document.getElementById('results-panel');
         const statusElement = document.getElementById('status');
         const errorElement = document.getElementById('error');
         const conversationElement = document.getElementById('conversation');
@@ -371,10 +697,44 @@
             deleteSessionButton.disabled = !currentSessionId;
         }
 
+        function buildExpandableText(text, className = '') {
+            const wrapper = document.createElement('div');
+            const body = document.createElement('div');
+            body.className = `clamped-text ${className}`.trim();
+            body.textContent = text || '暂无摘要';
+            wrapper.appendChild(body);
+
+            if ((text || '').length > 88) {
+                const toggle = document.createElement('button');
+                toggle.type = 'button';
+                toggle.className = 'text-toggle';
+                toggle.textContent = '展开';
+                toggle.addEventListener('click', () => {
+                    const expanded = body.classList.toggle('expanded');
+                    toggle.textContent = expanded ? '收起' : '展开';
+                });
+                wrapper.appendChild(toggle);
+            }
+
+            return wrapper;
+        }
+
+        function renderMarkdown(markdownText) {
+            if (!markdownText) {
+                return '<p class="placeholder">暂无答案。</p>';
+            }
+            if (window.marked && window.DOMPurify) {
+                return window.DOMPurify.sanitize(window.marked.parse(markdownText));
+            }
+            return `<p>${escapeHtml(markdownText).replaceAll('\n', '<br />')}</p>`;
+        }
+
         function resetRoundOutput() {
-            answerElement.textContent = '等待提问...';
-            logsElement.innerHTML = '';
-            resultsElement.innerHTML = '';
+            answerElement.innerHTML = '<p class="placeholder">等待提问...</p>';
+            sourcesElement.hidden = true;
+            sourcesListElement.innerHTML = '';
+            renderLogs([]);
+            renderResults([]);
             statusElement.textContent = '';
             errorElement.textContent = '';
         }
@@ -390,8 +750,10 @@
 
         function renderLogs(logs) {
             logsElement.innerHTML = '';
+            logsCountElement.textContent = String(logs.length);
             if (!logs.length) {
                 logsElement.innerHTML = '<div class="placeholder">当前没有执行日志。</div>';
+                logsPanel.open = false;
                 return;
             }
             logs.forEach((log) => {
@@ -404,20 +766,68 @@
 
         function renderResults(results) {
             resultsElement.innerHTML = '';
+            resultsCountElement.textContent = String(results.length);
             if (!results.length) {
                 resultsElement.innerHTML = '<div class="placeholder">当前没有搜索结果。</div>';
+                resultsPanel.open = false;
                 return;
             }
             results.forEach((result) => {
                 const item = document.createElement('div');
                 item.className = 'result-item';
-                item.innerHTML = `
-                    <strong>${escapeHtml(result.title)}</strong>
-                    <div class="meta">${escapeHtml(result.snippet)}</div>
-                    <div><a href="${escapeHtml(result.url)}" target="_blank" rel="noreferrer">${escapeHtml(result.url)}</a></div>
-                `;
+
+                const title = document.createElement('strong');
+                title.textContent = result.title || '未命名来源';
+                item.appendChild(title);
+
+                item.appendChild(buildExpandableText(result.snippet || '暂无摘要', 'meta'));
+
+                const linkRow = document.createElement('div');
+                const link = document.createElement('a');
+                link.href = result.url || '#';
+                link.target = '_blank';
+                link.rel = 'noreferrer';
+                link.textContent = result.url || '无链接';
+                linkRow.appendChild(link);
+                item.appendChild(linkRow);
+
                 resultsElement.appendChild(item);
             });
+        }
+
+        function renderSources(results) {
+            sourcesListElement.innerHTML = '';
+            if (!results.length) {
+                sourcesElement.hidden = true;
+                return;
+            }
+
+            results.forEach((result, index) => {
+                const item = document.createElement('div');
+                item.className = 'source-item';
+
+                const titleRow = document.createElement('div');
+                titleRow.className = 'source-title-row';
+                titleRow.innerHTML = `
+                    <span class="source-index">${index + 1}</span>
+                    <span class="source-title">${escapeHtml(result.title || '未命名来源')}</span>
+                `;
+                item.appendChild(titleRow);
+                item.appendChild(buildExpandableText(result.snippet || '暂无摘要', 'source-snippet'));
+
+                const meta = document.createElement('div');
+                meta.className = 'meta';
+                const link = document.createElement('a');
+                link.href = result.url || '#';
+                link.target = '_blank';
+                link.rel = 'noreferrer';
+                link.textContent = result.url || '无链接';
+                meta.appendChild(link);
+                item.appendChild(meta);
+
+                sourcesListElement.appendChild(item);
+            });
+            sourcesElement.hidden = false;
         }
 
         function renderConversation(messages) {
@@ -430,12 +840,15 @@
             messages.forEach((message) => {
                 const item = document.createElement('div');
                 item.className = `message ${message.role}`;
+                const renderedContent = message.role === 'assistant'
+                    ? `<div class="markdown-content">${renderMarkdown(message.content)}</div>`
+                    : `<div class="message-content">${escapeHtml(message.content)}</div>`;
                 item.innerHTML = `
                     <div class="message-role">
                         <span>${message.role === 'user' ? '用户' : 'Assistant'}</span>
                         <span>${escapeHtml(message.created_at)}</span>
                     </div>
-                    <div class="message-content">${escapeHtml(message.content)}</div>
+                    ${renderedContent}
                 `;
                 conversationElement.appendChild(item);
             });
@@ -495,11 +908,12 @@
                 currentSessionTitle = data.title;
                 setSessionMeta();
                 renderConversation(data.messages || []);
-                answerElement.textContent = data.messages?.length
-                    ? data.messages[data.messages.length - 1].content
-                    : '等待提问...';
-                logsElement.innerHTML = '<div class="placeholder">历史会话只展示对话内容，不保留每轮执行日志。</div>';
-                resultsElement.innerHTML = '<div class="placeholder">历史会话只展示对话内容，不回放搜索结果。</div>';
+                answerElement.innerHTML = data.messages?.length
+                    ? renderMarkdown(data.messages[data.messages.length - 1].content)
+                    : '<p class="placeholder">等待提问...</p>';
+                renderLogs(data.latest_logs || []);
+                renderResults(data.latest_search_results || []);
+                renderSources(data.latest_search_results || []);
                 statusElement.textContent = `已加载会话：${data.title}`;
                 await loadSessions();
             } catch (error) {
@@ -535,9 +949,11 @@
 
             submitButton.disabled = true;
             statusElement.textContent = '执行中...';
-            answerElement.textContent = '处理中...';
-            logsElement.innerHTML = '';
-            resultsElement.innerHTML = '';
+            answerElement.innerHTML = '<p class="placeholder">处理中...</p>';
+            sourcesElement.hidden = true;
+            sourcesListElement.innerHTML = '';
+            renderLogs([]);
+            renderResults([]);
 
             try {
                 const response = await fetch('/api/ask', {
@@ -556,17 +972,18 @@
                 currentSessionId = data.session_id;
                 currentSessionTitle = data.session_title;
                 setSessionMeta();
-                answerElement.textContent = data.answer;
+                answerElement.innerHTML = renderMarkdown(data.answer);
                 renderConversation(data.conversation || []);
                 renderLogs(data.logs || []);
                 renderResults(data.search_results || []);
+                renderSources(data.search_results || []);
                 statusElement.textContent = data.need_search
                     ? `已完成，触发搜索：${data.query || ''}`
                     : '已完成，未触发搜索';
                 questionInput.value = '';
                 await loadSessions();
             } catch (error) {
-                answerElement.textContent = '请求失败';
+                answerElement.innerHTML = '<p class="placeholder">请求失败</p>';
                 errorElement.textContent = error.message || '发生未知错误';
             } finally {
                 submitButton.disabled = false;

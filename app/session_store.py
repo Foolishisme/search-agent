@@ -4,7 +4,14 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from app.schemas import ConversationMessage, SessionDetail, SessionSummary
+from app.schemas import (
+    ConversationMessage,
+    RuntimeLog,
+    SearchResult,
+    SessionDetail,
+    SessionSummary,
+    SessionTurn,
+)
 
 META_PREFIX = "<!-- SEARCH_AGENT_SESSION_META\n"
 META_SUFFIX = "\n-->"
@@ -48,7 +55,17 @@ class MarkdownSessionStore:
             return None
         return self._read_session(path)
 
-    def append_turn(self, session_id: str | None, question: str, answer: str) -> SessionDetail:
+    def append_turn(
+        self,
+        session_id: str | None,
+        question: str,
+        answer: str,
+        *,
+        need_search: bool,
+        query: str | None,
+        logs: list[RuntimeLog],
+        search_results: list[SearchResult],
+    ) -> SessionDetail:
         normalized_question = question.strip()
         normalized_answer = answer.strip()
         if not normalized_question:
@@ -69,13 +86,27 @@ class MarkdownSessionStore:
                 message_count=0,
                 last_message_preview="",
                 messages=[],
+                turns=[],
+                latest_logs=[],
+                latest_search_results=[],
             )
 
-        session.messages.append(ConversationMessage(role="user", content=normalized_question, created_at=now))
-        session.messages.append(ConversationMessage(role="assistant", content=normalized_answer, created_at=now))
+        turn = SessionTurn(
+            created_at=now,
+            question=normalized_question,
+            answer=normalized_answer,
+            need_search=need_search,
+            query=query,
+            logs=[RuntimeLog.model_validate(item) for item in logs],
+            search_results=[SearchResult.model_validate(item) for item in search_results],
+        )
+        session.turns.append(turn)
+        session.messages = self._messages_from_turns(session.turns)
         session.updated_at = now
         session.message_count = len(session.messages)
         session.last_message_preview = self._build_preview(normalized_answer)
+        session.latest_logs = turn.logs
+        session.latest_search_results = turn.search_results
 
         path = self._path_for(session.session_id)
         path.write_text(self._serialize(session), encoding="utf-8")
@@ -97,6 +128,7 @@ class MarkdownSessionStore:
             "title": session.title,
             "created_at": session.created_at,
             "updated_at": session.updated_at,
+            "turns": [turn.model_dump(mode="json") for turn in session.turns],
         }
         lines = [
             f"{META_PREFIX}{json.dumps(meta, ensure_ascii=False)}{META_SUFFIX}",
@@ -110,17 +142,17 @@ class MarkdownSessionStore:
             "",
         ]
 
-        for message in session.messages:
-            role_label = "User" if message.role == "user" else "Assistant"
-            message_meta = json.dumps(
-                {"role": message.role, "created_at": message.created_at},
-                ensure_ascii=False,
-            )
+        for turn in session.turns:
             lines.extend(
                 [
-                    f"### {role_label} | {message.created_at}",
-                    f"{MESSAGE_START}{message_meta}\n-->",
-                    message.content,
+                    f"### User | {turn.created_at}",
+                    f'{MESSAGE_START}{json.dumps({"role": "user", "created_at": turn.created_at}, ensure_ascii=False)}\n-->',
+                    turn.question,
+                    "<!-- /SEARCH_AGENT_MESSAGE -->",
+                    "",
+                    f"### Assistant | {turn.created_at}",
+                    f'{MESSAGE_START}{json.dumps({"role": "assistant", "created_at": turn.created_at}, ensure_ascii=False)}\n-->',
+                    turn.answer,
                     "<!-- /SEARCH_AGENT_MESSAGE -->",
                     "",
                 ]
@@ -131,7 +163,9 @@ class MarkdownSessionStore:
     def _read_session(self, path: Path) -> SessionDetail:
         raw = path.read_text(encoding="utf-8")
         meta = self._parse_meta(raw)
-        messages = self._parse_messages(raw)
+        turns = self._parse_turns(meta, raw)
+        messages = self._messages_from_turns(turns)
+        latest_turn = turns[-1] if turns else None
         return SessionDetail(
             session_id=str(meta["session_id"]),
             title=str(meta["title"]),
@@ -140,6 +174,9 @@ class MarkdownSessionStore:
             message_count=len(messages),
             last_message_preview=self._build_preview(messages[-1].content if messages else ""),
             messages=messages,
+            turns=turns,
+            latest_logs=latest_turn.logs if latest_turn else [],
+            latest_search_results=latest_turn.search_results if latest_turn else [],
         )
 
     def _parse_meta(self, raw: str) -> dict:
@@ -162,6 +199,44 @@ class MarkdownSessionStore:
                     content=content,
                     created_at=meta["created_at"],
                 )
+            )
+        return messages
+
+    def _parse_turns(self, meta: dict, raw: str) -> list[SessionTurn]:
+        serialized_turns = meta.get("turns")
+        if isinstance(serialized_turns, list):
+            return [SessionTurn.model_validate(item) for item in serialized_turns]
+
+        messages = self._parse_messages(raw)
+        turns: list[SessionTurn] = []
+        for index in range(0, len(messages), 2):
+            if index + 1 >= len(messages):
+                break
+            user_message = messages[index]
+            assistant_message = messages[index + 1]
+            if user_message.role != "user" or assistant_message.role != "assistant":
+                continue
+            turns.append(
+                SessionTurn(
+                    created_at=assistant_message.created_at,
+                    question=user_message.content,
+                    answer=assistant_message.content,
+                    need_search=False,
+                    query=None,
+                    logs=[],
+                    search_results=[],
+                )
+            )
+        return turns
+
+    def _messages_from_turns(self, turns: list[SessionTurn]) -> list[ConversationMessage]:
+        messages: list[ConversationMessage] = []
+        for turn in turns:
+            messages.append(
+                ConversationMessage(role="user", content=turn.question, created_at=turn.created_at)
+            )
+            messages.append(
+                ConversationMessage(role="assistant", content=turn.answer, created_at=turn.created_at)
             )
         return messages
 

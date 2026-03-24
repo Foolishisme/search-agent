@@ -24,6 +24,12 @@ class ApiTests(unittest.TestCase):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertIn("最小搜索 Agent MVP", response.text)
+        self.assertIn("cdn.jsdelivr.net/npm/marked/marked.min.js", response.text)
+        self.assertIn('id="sources"', response.text)
+        self.assertIn("引用来源", response.text)
+        self.assertIn('class="floating-composer"', response.text)
+        self.assertIn('id="logs-panel"', response.text)
+        self.assertIn('id="results-panel"', response.text)
 
     def test_favicon(self):
         response = self.client.get("/favicon.ico")
@@ -97,6 +103,7 @@ class ApiTests(unittest.TestCase):
             answer="第一轮回答",
             need_search=False,
             logs=[RuntimeLog(stage="final", message="done")],
+            search_results=[SearchResult(title="标题", snippet="摘要", url="https://example.com")],
             conversation=[],
         )
 
@@ -117,6 +124,8 @@ class ApiTests(unittest.TestCase):
         detail = detail_response.json()
         self.assertEqual(len(detail["messages"]), 2)
         self.assertEqual(detail["messages"][0]["content"], "第一轮问题")
+        self.assertEqual(detail["latest_logs"][0]["message"], "done")
+        self.assertEqual(detail["latest_search_results"][0]["title"], "标题")
 
         delete_response = self.client.delete(f"/api/sessions/{session_id}")
         self.assertEqual(delete_response.status_code, 204)

@@ -31,6 +31,16 @@ class ConversationMessage(BaseModel):
     created_at: str
 
 
+class SessionTurn(BaseModel):
+    created_at: str
+    question: str
+    answer: str
+    need_search: bool
+    query: str | None = None
+    logs: list[RuntimeLog] = Field(default_factory=list)
+    search_results: list[SearchResult] = Field(default_factory=list)
+
+
 class SessionSummary(BaseModel):
     session_id: str
     title: str
@@ -42,6 +52,9 @@ class SessionSummary(BaseModel):
 
 class SessionDetail(SessionSummary):
     messages: list[ConversationMessage] = Field(default_factory=list)
+    turns: list[SessionTurn] = Field(default_factory=list)
+    latest_logs: list[RuntimeLog] = Field(default_factory=list)
+    latest_search_results: list[SearchResult] = Field(default_factory=list)
 
 
 class AskResponse(BaseModel):
