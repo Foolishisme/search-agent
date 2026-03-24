@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>最小搜索 Agent</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+        }
+        .container {
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 24px;
+        }
+        .card {
+            background: #111827;
+            border: 1px solid #334155;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        textarea {
+            width: 100%;
+            min-height: 120px;
+            border-radius: 12px;
+            border: 1px solid #475569;
+            background: #020617;
+            color: #e2e8f0;
+            padding: 14px;
+            box-sizing: border-box;
+            resize: vertical;
+        }
+        button {
+            margin-top: 16px;
+            background: #2563eb;
+            color: white;
+            border: 0;
+            border-radius: 10px;
+            padding: 12px 18px;
+            cursor: pointer;
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .answer {
+            white-space: pre-wrap;
+            line-height: 1.7;
+        }
+        .log-item, .result-item {
+            padding: 12px;
+            border-radius: 10px;
+            background: #0b1220;
+            border: 1px solid #1e293b;
+            margin-top: 10px;
+        }
+        a {
+            color: #60a5fa;
+        }
+        .meta {
+            color: #94a3b8;
+            font-size: 14px;
+        }
+        .error {
+            color: #fca5a5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>最小搜索 Agent MVP</h1>
+            <p class="meta">输入一个问题，系统会先判断是否需要搜索，再决定直接回答或调用 Tavily 搜索后由 Gemini 整理答案。</p>
+            <textarea id="question" placeholder="例如：帮我查一下最近 AI Agent runtime 的趋势"></textarea>
+            <button id="submit">提交问题</button>
+            <p id="status" class="meta"></p>
+            <p id="error" class="error"></p>
+        </div>
+
+        <div class="card">
+            <h2>答案</h2>
+            <div id="answer" class="answer">等待提问…</div>
+        </div>
+
+        <div class="card">
+            <h2>执行日志</h2>
+            <div id="logs"></div>
+        </div>
+
+        <div class="card">
+            <h2>搜索结果</h2>
+            <div id="results"></div>
+        </div>
+    </div>
+
+    <script>
+        const submitButton = document.getElementById('submit');
+        const questionInput = document.getElementById('question');
+        const answerElement = document.getElementById('answer');
+        const logsElement = document.getElementById('logs');
+        const resultsElement = document.getElementById('results');
+        const statusElement = document.getElementById('status');
+        const errorElement = document.getElementById('error');
+
+        function renderLogs(logs) {
+            logsElement.innerHTML = '';
+            logs.forEach(log => {
+                const item = document.createElement('div');
+                item.className = 'log-item';
+                item.textContent = `[${log.stage}] ${log.message}`;
+                logsElement.appendChild(item);
+            });
+        }
+
+        function renderResults(results) {
+            resultsElement.innerHTML = '';
+            if (!results.length) {
+                resultsElement.textContent = '无搜索结果';
+                return;
+            }
+            results.forEach(result => {
+                const item = document.createElement('div');
+                item.className = 'result-item';
+                item.innerHTML = `<strong>${result.title}</strong><div class="meta">${result.snippet}</div><div><a href="${result.url}" target="_blank" rel="noreferrer">${result.url}</a></div>`;
+                resultsElement.appendChild(item);
+            });
+        }
+
+        submitButton.addEventListener('click', async () => {
+            const question = questionInput.value.trim();
+            errorElement.textContent = '';
+            statusElement.textContent = '';
+            if (!question) {
+                errorElement.textContent = '请输入问题';
+                return;
+            }
+
+            submitButton.disabled = true;
+            statusElement.textContent = '执行中...';
+            answerElement.textContent = '处理中...';
+            logsElement.innerHTML = '';
+            resultsElement.innerHTML = '';
+
+            try {
+                const response = await fetch('/api/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.detail || '请求失败');
+                }
+                answerElement.textContent = data.answer;
+                renderLogs(data.logs || []);
+                renderResults(data.search_results || []);
+                statusElement.textContent = data.need_search ? `已完成，触发搜索：${data.query || ''}` : '已完成，未触发搜索';
+            } catch (error) {
+                answerElement.textContent = '请求失败';
+                errorElement.textContent = error.message || '发生未知错误';
+            } finally {
+                submitButton.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
