@@ -15,7 +15,8 @@ class Settings:
     deepseek_base_url: str
     tavily_api_key: str
     search_top_k: int
-    request_timeout: float
+    llm_request_timeout: float
+    search_request_timeout: float
     log_level: str
     proxy_url: str | None
 
@@ -28,8 +29,9 @@ def get_settings() -> Settings:
         deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip(),
         deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").strip(),
         tavily_api_key=os.getenv("TAVILY_API_KEY", "").strip(),
-        search_top_k=int(os.getenv("SEARCH_TOP_K", "5")),
-        request_timeout=float(os.getenv("REQUEST_TIMEOUT", "20")),
+        search_top_k=int(os.getenv("SEARCH_TOP_K", "10")),
+        llm_request_timeout=float(os.getenv("LLM_REQUEST_TIMEOUT", "90")),
+        search_request_timeout=float(os.getenv("SEARCH_REQUEST_TIMEOUT", "20")),
         log_level=os.getenv("LOG_LEVEL", "INFO").strip(),
         proxy_url=proxy_url,
     )

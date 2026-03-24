@@ -32,7 +32,7 @@ class TavilySearchTool:
 
         try:
             client_kwargs = {
-                "timeout": self.settings.request_timeout,
+                "timeout": self.settings.search_request_timeout,
                 "trust_env": False,
             }
             if self.settings.proxy_url:

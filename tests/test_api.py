@@ -34,6 +34,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("最小搜索 Agent MVP", response.text)
         self.assertIn("cdn.jsdelivr.net/npm/marked/marked.min.js", response.text)
+        self.assertIn("cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js", response.text)
         self.assertIn('id="sources"', response.text)
         self.assertIn("引用来源", response.text)
         self.assertIn('class="floating-composer"', response.text)

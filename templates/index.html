@@ -6,6 +6,7 @@
     <title>最小搜索 Agent</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
     <style>
         :root {
             --bg: #f4f1ea;
@@ -39,7 +40,6 @@
             display: flex;
             gap: 24px;
             padding: 24px;
-            padding-bottom: 220px;
         }
 
         .sidebar {
@@ -78,7 +78,7 @@
         }
 
         .card {
-            padding: 22px;
+            padding: 18px;
         }
 
         .header-row,
@@ -95,7 +95,8 @@
         }
 
         .conversation-card,
-        .answer-card {
+        .answer-card,
+        .composer-card {
             grid-column: 1;
         }
 
@@ -264,13 +265,13 @@
         .conversation {
             display: flex;
             flex-direction: column;
-            gap: 14px;
+            gap: 12px;
         }
 
         .message {
             border: 1px solid var(--line);
             border-radius: 16px;
-            padding: 14px 16px;
+            padding: 12px 14px;
             background: var(--panel-alt);
         }
 
@@ -505,6 +506,11 @@
             background: transparent;
         }
 
+        .mermaid {
+            overflow-x: auto;
+            padding: 8px 0;
+        }
+
         .answer-markdown blockquote,
         .markdown-content blockquote {
             padding: 14px 16px;
@@ -694,32 +700,33 @@
         }
 
         .floating-composer {
-            position: fixed;
-            left: 50%;
-            bottom: 20px;
-            transform: translateX(-50%);
-            width: min(860px, calc(100vw - 380px));
-            z-index: 30;
+            grid-column: 1;
+            padding: 18px;
+            border-radius: 20px;
+            border: 1px solid var(--line);
+            background: var(--panel);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 18px 50px rgba(120, 96, 62, 0.1);
         }
 
         .composer-shell {
-            padding: 16px 18px 14px;
-            border-radius: 28px;
-            border: 1px solid var(--line);
-            background: rgba(255, 255, 255, 0.92);
-            box-shadow: 0 24px 60px rgba(120, 96, 62, 0.16);
-            backdrop-filter: blur(18px);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
         }
 
         .composer-shell textarea {
             width: 100%;
-            min-height: 92px;
-            resize: vertical;
+            min-height: 40px;
+            max-height: 220px;
+            resize: none;
+            overflow-y: hidden;
             margin-top: 0;
             padding: 0;
             border: 0;
             background: transparent;
             outline: none;
+            line-height: 1.7;
         }
 
         .composer-status {
@@ -731,7 +738,7 @@
             align-items: center;
             justify-content: space-between;
             gap: 12px;
-            margin-bottom: 12px;
+            margin-bottom: 8px;
         }
 
         .composer-tools {
@@ -768,13 +775,9 @@
             .session-toolbar-card,
             .conversation-card,
             .answer-card,
+            .composer-card,
             .side-card {
                 grid-column: 1;
-            }
-
-            .floating-composer {
-                width: calc(100vw - 24px);
-                bottom: 12px;
             }
         }
     </style>
@@ -951,6 +954,8 @@
         const errorElement = document.getElementById('error');
         const conversationElement = document.getElementById('conversation');
         const sessionListElement = document.getElementById('session-list');
+        const mainGridElement = document.querySelector('.main-grid');
+        const composerContainerElement = document.querySelector('.floating-composer');
         const sessionToolbarCardElement = document.querySelector('.session-toolbar-card');
         const sessionMetaElement = document.getElementById('session-meta');
         const sessionAttachmentsElement = document.getElementById('session-attachments');
@@ -983,12 +988,27 @@
         let activeRunId = null;
         let activeRunBaseSessionId = null;
 
+        if (window.mermaid) {
+            window.mermaid.initialize({
+                startOnLoad: false,
+                securityLevel: 'strict',
+                theme: 'neutral',
+            });
+        }
+
         function escapeHtml(value) {
             return value
                 .replaceAll('&', '&amp;')
                 .replaceAll('<', '&lt;')
                 .replaceAll('>', '&gt;')
                 .replaceAll('"', '&quot;');
+        }
+
+        function autosizeQuestionInput() {
+            questionInput.style.height = 'auto';
+            const nextHeight = Math.min(questionInput.scrollHeight, 220);
+            questionInput.style.height = `${Math.max(nextHeight, 40)}px`;
+            questionInput.style.overflowY = questionInput.scrollHeight > 220 ? 'auto' : 'hidden';
         }
 
         function setSessionMeta() {
@@ -1080,7 +1100,7 @@
         }
 
         function renderArtifactPreview() {
-            artifactPreviewElement.innerHTML = renderMarkdown(artifactContentInput.value);
+            renderMarkdownInto(artifactPreviewElement, artifactContentInput.value);
         }
 
         function renderArtifactList(artifacts) {
@@ -1173,6 +1193,43 @@
             return `<p>${escapeHtml(markdownText).replaceAll('\n', '<br />')}</p>`;
         }
 
+        async function renderMermaidIn(container) {
+            if (!container || !window.mermaid) {
+                return;
+            }
+
+            const blocks = Array.from(container.querySelectorAll('pre code.language-mermaid, pre code.lang-mermaid'));
+            if (!blocks.length) {
+                return;
+            }
+
+            blocks.forEach((block, index) => {
+                const pre = block.closest('pre');
+                if (!pre) {
+                    return;
+                }
+                const chart = document.createElement('div');
+                chart.className = 'mermaid';
+                chart.id = `mermaid-${Date.now()}-${index}`;
+                chart.textContent = block.textContent || '';
+                pre.replaceWith(chart);
+            });
+
+            await window.mermaid.run({
+                nodes: Array.from(container.querySelectorAll('.mermaid')),
+                suppressErrors: true,
+            });
+        }
+
+        function renderMarkdownInto(container, markdownText, wrapperClass = '') {
+            if (!container) {
+                return;
+            }
+            const html = renderMarkdown(markdownText);
+            container.innerHTML = wrapperClass ? `<div class="${wrapperClass}">${html}</div>` : html;
+            void renderMermaidIn(container);
+        }
+
         function resetRoundOutput() {
             latestSearchResults = [];
             answerElement.innerHTML = '<p class="placeholder">等待提问...</p>';
@@ -1191,6 +1248,7 @@
             currentSessionId = null;
             currentSessionTitle = '新会话';
             questionInput.value = '';
+            autosizeQuestionInput();
             pendingFiles = [];
             latestAnswerMarkdown = '';
             latestSearchResults = [];
@@ -1388,11 +1446,20 @@
                 }
                 conversationElement.appendChild(item);
             });
+            void renderMermaidIn(conversationElement);
         }
 
         function initializeConversationLayout() {
             if (artifactShellElement && sessionToolbarCardElement && artifactShellElement.parentElement !== sessionToolbarCardElement) {
                 sessionToolbarCardElement.appendChild(artifactShellElement);
+            }
+            if (composerContainerElement && mainGridElement && composerContainerElement.parentElement !== mainGridElement) {
+                const firstSideCard = mainGridElement.querySelector('.side-card');
+                if (firstSideCard) {
+                    mainGridElement.insertBefore(composerContainerElement, firstSideCard);
+                } else {
+                    mainGridElement.appendChild(composerContainerElement);
+                }
             }
             sourcesElement.classList.add('hidden');
             hideLiveAnswer();
@@ -1400,6 +1467,7 @@
             if (resultsCard) {
                 resultsCard.classList.add('hidden');
             }
+            autosizeQuestionInput();
         }
 
         async function loadSessions() {
@@ -1636,6 +1704,7 @@
                                 ? `已完成，触发搜索：${data.query || ''}`
                                 : '已完成，未触发搜索';
                             questionInput.value = '';
+                            autosizeQuestionInput();
                             pendingFiles = [];
                             renderPendingFiles();
                             await loadArtifacts(data.session_id);
@@ -1690,6 +1759,7 @@
             renderPendingFiles();
             fileInput.value = '';
         });
+        questionInput.addEventListener('input', autosizeQuestionInput);
         questionInput.addEventListener('keydown', (event) => {
             if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
                 event.preventDefault();
