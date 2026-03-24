@@ -5,110 +5,396 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>最小搜索 Agent</title>
     <style>
+        :root {
+            --bg: #09111f;
+            --panel: #101a2c;
+            --panel-alt: #0c1628;
+            --line: #243247;
+            --text: #e6eefb;
+            --muted: #8ea2c6;
+            --accent: #4f8cff;
+            --accent-soft: rgba(79, 140, 255, 0.18);
+            --danger: #ef6b73;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             margin: 0;
-            font-family: Arial, sans-serif;
-            background: #0f172a;
-            color: #e2e8f0;
+            font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+            background:
+                radial-gradient(circle at top left, rgba(79, 140, 255, 0.18), transparent 24%),
+                linear-gradient(180deg, #0b1322 0%, #09111f 100%);
+            color: var(--text);
         }
-        .container {
-            max-width: 900px;
-            margin: 40px auto;
+
+        .layout {
+            min-height: 100vh;
+            display: flex;
+            gap: 24px;
             padding: 24px;
         }
-        .card {
-            background: #111827;
-            border: 1px solid #334155;
-            border-radius: 16px;
-            padding: 20px;
-            margin-bottom: 20px;
+
+        .sidebar {
+            width: 320px;
+            flex-shrink: 0;
         }
+
+        .main {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .panel {
+            background: rgba(16, 26, 44, 0.92);
+            border: 1px solid var(--line);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 18px 50px rgba(2, 8, 20, 0.32);
+        }
+
+        .sidebar-panel {
+            padding: 20px;
+            position: sticky;
+            top: 24px;
+        }
+
+        .panel + .panel {
+            margin-top: 20px;
+        }
+
+        .main-grid {
+            display: grid;
+            gap: 20px;
+        }
+
+        .card {
+            padding: 22px;
+        }
+
+        .header-row,
+        .session-toolbar,
+        .composer-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        h1,
+        h2,
+        h3,
+        p {
+            margin: 0;
+        }
+
+        h1 {
+            font-size: 22px;
+            margin-bottom: 8px;
+        }
+
+        h2 {
+            font-size: 18px;
+            margin-bottom: 16px;
+        }
+
+        .meta,
+        .session-time,
+        .placeholder {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .session-list {
+            margin-top: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: calc(100vh - 180px);
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .session-item {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: var(--panel-alt);
+            padding: 14px;
+            color: inherit;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .session-item.active {
+            border-color: var(--accent);
+            background: linear-gradient(180deg, var(--accent-soft), rgba(12, 22, 40, 0.95));
+        }
+
+        .session-item:hover {
+            border-color: #3d5273;
+        }
+
+        .session-item-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .session-title {
+            font-size: 14px;
+            font-weight: 700;
+            line-height: 1.5;
+        }
+
+        .session-preview {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
         textarea {
             width: 100%;
             min-height: 120px;
-            border-radius: 12px;
-            border: 1px solid #475569;
-            background: #020617;
-            color: #e2e8f0;
-            padding: 14px;
-            box-sizing: border-box;
             resize: vertical;
-        }
-        button {
             margin-top: 16px;
-            background: #2563eb;
-            color: white;
-            border: 0;
-            border-radius: 10px;
-            padding: 12px 18px;
-            cursor: pointer;
+            padding: 16px;
+            border-radius: 16px;
+            border: 1px solid var(--line);
+            background: #08101d;
+            color: var(--text);
+            font: inherit;
         }
+
+        button {
+            border: 0;
+            border-radius: 12px;
+            padding: 11px 16px;
+            cursor: pointer;
+            font: inherit;
+            color: white;
+            background: var(--accent);
+        }
+
+        button.secondary {
+            color: var(--text);
+            background: transparent;
+            border: 1px solid var(--line);
+        }
+
+        button.danger {
+            background: rgba(239, 107, 115, 0.16);
+            color: #ffc8cc;
+            border: 1px solid rgba(239, 107, 115, 0.32);
+        }
+
+        button.small {
+            padding: 7px 10px;
+            border-radius: 10px;
+            font-size: 12px;
+        }
+
         button:disabled {
-            opacity: 0.6;
+            opacity: 0.5;
             cursor: not-allowed;
         }
-        .answer {
+
+        .answer,
+        .message-content,
+        .log-item,
+        .result-item {
             white-space: pre-wrap;
-            line-height: 1.7;
+            line-height: 1.75;
         }
-        .log-item, .result-item {
-            padding: 12px;
-            border-radius: 10px;
-            background: #0b1220;
-            border: 1px solid #1e293b;
-            margin-top: 10px;
+
+        .conversation {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
         }
-        a {
-            color: #60a5fa;
+
+        .message {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            padding: 14px 16px;
+            background: var(--panel-alt);
         }
-        .meta {
-            color: #94a3b8;
-            font-size: 14px;
+
+        .message.user {
+            border-color: rgba(79, 140, 255, 0.42);
+            background: rgba(79, 140, 255, 0.08);
         }
+
+        .message-role {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .log-item,
+        .result-item {
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: var(--panel-alt);
+            border: 1px solid var(--line);
+        }
+
+        .stack {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
         .error {
-            color: #fca5a5;
+            color: #ffb7bc;
+            margin-top: 12px;
+        }
+
+        a {
+            color: #8bb6ff;
+        }
+
+        @media (max-width: 960px) {
+            .layout {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: auto;
+            }
+
+            .sidebar-panel {
+                position: static;
+            }
+
+            .session-list {
+                max-height: none;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="card">
-            <h1>最小搜索 Agent MVP</h1>
-            <p class="meta">输入一个问题，系统会先判断是否需要搜索，再决定直接回答或调用 Tavily 搜索后由 Gemini 整理答案。</p>
-            <textarea id="question" placeholder="例如：帮我查一下最近 AI Agent runtime 的趋势"></textarea>
-            <button id="submit">提交问题</button>
-            <p id="status" class="meta"></p>
-            <p id="error" class="error"></p>
-        </div>
+    <div class="layout">
+        <aside class="sidebar">
+            <div class="panel sidebar-panel">
+                <div class="header-row">
+                    <div>
+                        <h2>历史对话</h2>
+                        <p class="meta">每个会话会保存为一个 Markdown 记忆文件。</p>
+                    </div>
+                    <button id="new-session" class="secondary small">新建会话</button>
+                </div>
+                <div id="session-list" class="session-list">
+                    <div class="placeholder">正在加载会话列表...</div>
+                </div>
+            </div>
+        </aside>
 
-        <div class="card">
-            <h2>答案</h2>
-            <div id="answer" class="answer">等待提问…</div>
-        </div>
+        <main class="main">
+            <div class="main-grid">
+                <section class="panel card">
+                    <div class="session-toolbar">
+                        <div>
+                            <h1>最小搜索 Agent MVP</h1>
+                            <p id="session-meta" class="meta">当前会话：新会话</p>
+                        </div>
+                        <button id="delete-session" class="danger" disabled>删除记忆</button>
+                    </div>
+                    <textarea id="question" placeholder="例如：帮我查一下最近 AI Agent runtime 的趋势"></textarea>
+                    <div class="composer-actions">
+                        <button id="submit">发送问题</button>
+                        <p id="status" class="meta"></p>
+                    </div>
+                    <p id="error" class="error"></p>
+                </section>
 
-        <div class="card">
-            <h2>执行日志</h2>
-            <div id="logs"></div>
-        </div>
+                <section class="panel card">
+                    <h2>当前会话内容</h2>
+                    <div id="conversation" class="conversation">
+                        <div class="placeholder">还没有对话记录，发送第一条消息后会自动创建会话。</div>
+                    </div>
+                </section>
 
-        <div class="card">
-            <h2>搜索结果</h2>
-            <div id="results"></div>
-        </div>
+                <section class="panel card">
+                    <h2>本轮答案</h2>
+                    <div id="answer" class="answer">等待提问...</div>
+                </section>
+
+                <section class="panel card">
+                    <h2>执行日志</h2>
+                    <div id="logs" class="stack"></div>
+                </section>
+
+                <section class="panel card">
+                    <h2>搜索结果</h2>
+                    <div id="results" class="stack"></div>
+                </section>
+            </div>
+        </main>
     </div>
 
     <script>
         const submitButton = document.getElementById('submit');
+        const newSessionButton = document.getElementById('new-session');
+        const deleteSessionButton = document.getElementById('delete-session');
         const questionInput = document.getElementById('question');
         const answerElement = document.getElementById('answer');
         const logsElement = document.getElementById('logs');
         const resultsElement = document.getElementById('results');
         const statusElement = document.getElementById('status');
         const errorElement = document.getElementById('error');
+        const conversationElement = document.getElementById('conversation');
+        const sessionListElement = document.getElementById('session-list');
+        const sessionMetaElement = document.getElementById('session-meta');
+
+        let currentSessionId = null;
+        let currentSessionTitle = '新会话';
+
+        function escapeHtml(value) {
+            return value
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;');
+        }
+
+        function setSessionMeta() {
+            sessionMetaElement.textContent = `当前会话：${currentSessionTitle}`;
+            deleteSessionButton.disabled = !currentSessionId;
+        }
+
+        function resetRoundOutput() {
+            answerElement.textContent = '等待提问...';
+            logsElement.innerHTML = '';
+            resultsElement.innerHTML = '';
+            statusElement.textContent = '';
+            errorElement.textContent = '';
+        }
+
+        function startNewSession() {
+            currentSessionId = null;
+            currentSessionTitle = '新会话';
+            questionInput.value = '';
+            conversationElement.innerHTML = '<div class="placeholder">还没有对话记录，发送第一条消息后会自动创建会话。</div>';
+            resetRoundOutput();
+            setSessionMeta();
+        }
 
         function renderLogs(logs) {
             logsElement.innerHTML = '';
-            logs.forEach(log => {
+            if (!logs.length) {
+                logsElement.innerHTML = '<div class="placeholder">当前没有执行日志。</div>';
+                return;
+            }
+            logs.forEach((log) => {
                 const item = document.createElement('div');
                 item.className = 'log-item';
                 item.textContent = `[${log.stage}] ${log.message}`;
@@ -119,21 +405,129 @@
         function renderResults(results) {
             resultsElement.innerHTML = '';
             if (!results.length) {
-                resultsElement.textContent = '无搜索结果';
+                resultsElement.innerHTML = '<div class="placeholder">当前没有搜索结果。</div>';
                 return;
             }
-            results.forEach(result => {
+            results.forEach((result) => {
                 const item = document.createElement('div');
                 item.className = 'result-item';
-                item.innerHTML = `<strong>${result.title}</strong><div class="meta">${result.snippet}</div><div><a href="${result.url}" target="_blank" rel="noreferrer">${result.url}</a></div>`;
+                item.innerHTML = `
+                    <strong>${escapeHtml(result.title)}</strong>
+                    <div class="meta">${escapeHtml(result.snippet)}</div>
+                    <div><a href="${escapeHtml(result.url)}" target="_blank" rel="noreferrer">${escapeHtml(result.url)}</a></div>
+                `;
                 resultsElement.appendChild(item);
             });
+        }
+
+        function renderConversation(messages) {
+            conversationElement.innerHTML = '';
+            if (!messages.length) {
+                conversationElement.innerHTML = '<div class="placeholder">当前会话为空。</div>';
+                return;
+            }
+
+            messages.forEach((message) => {
+                const item = document.createElement('div');
+                item.className = `message ${message.role}`;
+                item.innerHTML = `
+                    <div class="message-role">
+                        <span>${message.role === 'user' ? '用户' : 'Assistant'}</span>
+                        <span>${escapeHtml(message.created_at)}</span>
+                    </div>
+                    <div class="message-content">${escapeHtml(message.content)}</div>
+                `;
+                conversationElement.appendChild(item);
+            });
+        }
+
+        async function loadSessions() {
+            try {
+                const response = await fetch('/api/sessions');
+                if (!response.ok) {
+                    throw new Error('加载会话失败');
+                }
+                const sessions = await response.json();
+                renderSessionList(sessions);
+            } catch (error) {
+                sessionListElement.innerHTML = `<div class="placeholder">${error.message || '加载会话失败'}</div>`;
+            }
+        }
+
+        function renderSessionList(sessions) {
+            sessionListElement.innerHTML = '';
+            if (!sessions.length) {
+                sessionListElement.innerHTML = '<div class="placeholder">还没有历史会话。</div>';
+                return;
+            }
+
+            sessions.forEach((session) => {
+                const item = document.createElement('div');
+                item.className = `session-item${session.session_id === currentSessionId ? ' active' : ''}`;
+                item.addEventListener('click', () => loadSessionDetail(session.session_id));
+                item.innerHTML = `
+                    <div class="session-item-head">
+                        <div class="session-title">${escapeHtml(session.title)}</div>
+                        <button class="danger small" data-session-id="${escapeHtml(session.session_id)}">删除</button>
+                    </div>
+                    <div class="session-preview">${escapeHtml(session.last_message_preview || '暂无摘要')}</div>
+                    <div class="session-time">${escapeHtml(session.updated_at)}</div>
+                `;
+                const deleteButton = item.querySelector('[data-session-id]');
+                deleteButton.addEventListener('click', async (event) => {
+                    event.stopPropagation();
+                    await deleteSession(session.session_id);
+                });
+                sessionListElement.appendChild(item);
+            });
+        }
+
+        async function loadSessionDetail(sessionId) {
+            errorElement.textContent = '';
+            try {
+                const response = await fetch(`/api/sessions/${sessionId}`);
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.detail || '加载会话失败');
+                }
+
+                currentSessionId = data.session_id;
+                currentSessionTitle = data.title;
+                setSessionMeta();
+                renderConversation(data.messages || []);
+                answerElement.textContent = data.messages?.length
+                    ? data.messages[data.messages.length - 1].content
+                    : '等待提问...';
+                logsElement.innerHTML = '<div class="placeholder">历史会话只展示对话内容，不保留每轮执行日志。</div>';
+                resultsElement.innerHTML = '<div class="placeholder">历史会话只展示对话内容，不回放搜索结果。</div>';
+                statusElement.textContent = `已加载会话：${data.title}`;
+                await loadSessions();
+            } catch (error) {
+                errorElement.textContent = error.message || '加载会话失败';
+            }
+        }
+
+        async function deleteSession(sessionId) {
+            errorElement.textContent = '';
+            try {
+                const response = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || '删除会话失败');
+                }
+
+                if (currentSessionId === sessionId) {
+                    startNewSession();
+                }
+                await loadSessions();
+            } catch (error) {
+                errorElement.textContent = error.message || '删除会话失败';
+            }
         }
 
         submitButton.addEventListener('click', async () => {
             const question = questionInput.value.trim();
             errorElement.textContent = '';
-            statusElement.textContent = '';
             if (!question) {
                 errorElement.textContent = '请输入问题';
                 return;
@@ -149,16 +543,28 @@
                 const response = await fetch('/api/ask', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question })
+                    body: JSON.stringify({
+                        question,
+                        session_id: currentSessionId,
+                    }),
                 });
                 const data = await response.json();
                 if (!response.ok) {
                     throw new Error(data.detail || '请求失败');
                 }
+
+                currentSessionId = data.session_id;
+                currentSessionTitle = data.session_title;
+                setSessionMeta();
                 answerElement.textContent = data.answer;
+                renderConversation(data.conversation || []);
                 renderLogs(data.logs || []);
                 renderResults(data.search_results || []);
-                statusElement.textContent = data.need_search ? `已完成，触发搜索：${data.query || ''}` : '已完成，未触发搜索';
+                statusElement.textContent = data.need_search
+                    ? `已完成，触发搜索：${data.query || ''}`
+                    : '已完成，未触发搜索';
+                questionInput.value = '';
+                await loadSessions();
             } catch (error) {
                 answerElement.textContent = '请求失败';
                 errorElement.textContent = error.message || '发生未知错误';
@@ -166,6 +572,19 @@
                 submitButton.disabled = false;
             }
         });
+
+        newSessionButton.addEventListener('click', startNewSession);
+        deleteSessionButton.addEventListener('click', async () => {
+            if (!currentSessionId) {
+                return;
+            }
+            await deleteSession(currentSessionId);
+        });
+
+        startNewSession();
+        renderLogs([]);
+        renderResults([]);
+        loadSessions();
     </script>
 </body>
 </html>

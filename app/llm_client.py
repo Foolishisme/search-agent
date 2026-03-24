@@ -4,7 +4,7 @@ import logging
 import httpx
 
 from app.config import Settings
-from app.schemas import DecisionResult, SearchResult
+from app.schemas import AgentAction, ConversationMessage
 
 logger = logging.getLogger(__name__)
 
@@ -18,38 +18,55 @@ class DeepSeekClient:
         self.settings = settings
         self.endpoint = f"{self.settings.deepseek_base_url.rstrip('/')}/chat/completions"
 
-    async def decide(self, question: str) -> DecisionResult:
-        prompt = (
-            "你是一个最小搜索 Agent 的决策器。请严格输出 JSON，不要输出 Markdown，不要输出额外解释。"
-            '如果问题可以依赖稳定常识直接回答，返回 {"need_search": false, "answer": "..."}。'
-            '如果问题需要外部信息、最新信息、事实检索或网页信息，返回 {"need_search": true, "query": "..."}。'
-            "query 必须是适合搜索引擎执行的中文或英文短查询。"
-            f"\n用户问题：{question}"
-        )
+    async def next_action(
+        self,
+        question: str,
+        history: list[dict],
+        conversation: list[ConversationMessage] | None = None,
+    ) -> AgentAction:
+        prompt = self._build_action_prompt(question, history, conversation or [])
         data = await self._generate_json(prompt)
         try:
-            decision = DecisionResult.model_validate(data)
+            action = AgentAction.model_validate(data)
         except Exception as exc:
             logger.exception("DeepSeek 决策结果解析失败")
             raise LLMClientError("LLM 决策结果格式不合法") from exc
 
-        if decision.need_search and not (decision.query or "").strip():
-            raise LLMClientError("LLM 判断需要搜索，但未返回查询词")
-        if not decision.need_search and not (decision.answer or "").strip():
-            raise LLMClientError("LLM 判断无需搜索，但未返回直接答案")
-        return decision
+        if action.action == "search" and not (action.query or "").strip():
+            raise LLMClientError("LLM 选择 search，但未返回查询词")
+        if action.action == "final" and not (action.answer or "").strip():
+            raise LLMClientError("LLM 选择 final，但未返回最终答案")
+        return action
 
-    async def summarize(self, question: str, search_results: list[SearchResult]) -> str:
-        serialized_results = json.dumps([item.model_dump() for item in search_results], ensure_ascii=False)
-        prompt = (
-            "你是一个最小搜索 Agent 的回答器。"
-            "请基于给定问题和搜索结果，用中文输出清晰、自然、简洁但完整的最终回答。"
-            "如果信息不足，要明确说不确定或未找到充分信息。"
-            "不要输出 JSON。"
+    def _build_action_prompt(
+        self,
+        question: str,
+        history: list[dict],
+        conversation: list[ConversationMessage],
+    ) -> str:
+        serialized_history = json.dumps(history, ensure_ascii=False)
+        recent_conversation = [
+            {
+                "role": item.role,
+                "content": item.content,
+                "created_at": item.created_at,
+            }
+            for item in conversation[-6:]
+        ]
+        serialized_conversation = json.dumps(recent_conversation, ensure_ascii=False)
+        return (
+            "你是一个最小搜索 Agent。你每一轮只能输出一个 JSON 对象，不能输出 Markdown，不能输出额外解释。"
+            "你可用的 action 只有两种："
+            '1. {"action":"search","query":"..."} 表示调用搜索工具；'
+            '2. {"action":"final","answer":"..."} 表示直接输出最终答案。'
+            "如果当前信息不足以可靠回答，你应该优先选择 search。"
+            "如果 history 中已经有搜索结果，你应基于 history 里的结果整理答案，而不是继续盲目搜索。"
+            "如果 conversation 中有历史对话，你应把它当作当前会话记忆；当用户问题依赖上下文时，需要结合这些历史信息理解意图。"
+            "当搜索结果不足时，可以直接输出带不确定性的 final。"
             f"\n用户问题：{question}"
-            f"\n搜索结果：{serialized_results}"
+            f"\n当前 conversation：{serialized_conversation}"
+            f"\n当前 history：{serialized_history}"
         )
-        return await self._generate_text(prompt)
 
     async def _generate_json(self, prompt: str) -> dict:
         payload = {
