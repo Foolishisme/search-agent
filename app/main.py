@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.attachment_store import AttachmentStore, AttachmentStoreError
 from app.artifact_store import ArtifactStoreError, MarkdownArtifactStore
+from app.artifact_tool import save_markdown_artifact
 from app.config import get_settings
 from app.llm_client import DeepSeekClient
 from app.logger import setup_logger
@@ -31,6 +32,7 @@ artifact_store = MarkdownArtifactStore(BASE_DIR / "target" / "artifacts")
 runtime = AgentRuntime(
     llm_client=DeepSeekClient(settings),
     search_tool=TavilySearchTool(settings),
+    artifact_store=artifact_store,
 )
 
 
@@ -46,6 +48,7 @@ async def favicon() -> Response:
 
 @app.post("/api/ask", response_model=AskResponse)
 async def ask(request: AskRequest) -> AskResponse:
+    effective_session_id = request.session_id or uuid4().hex
     existing_session = None
     if request.session_id:
         existing_session = session_store.get_session(request.session_id)
@@ -54,23 +57,25 @@ async def ask(request: AskRequest) -> AskResponse:
 
     try:
         attachments = (
-            attachment_store.list_attachment_contexts(request.session_id)
-            if request.session_id
+            attachment_store.list_attachment_contexts(effective_session_id)
+            if effective_session_id
             else []
         )
         response = await runtime.run(
             request.question,
             conversation=existing_session.messages if existing_session else [],
             attachments=attachments,
+            session_id=effective_session_id,
         )
         session = session_store.append_turn(
-            request.session_id,
+            effective_session_id,
             request.question,
             response.answer,
             need_search=response.need_search,
             query=response.query,
             logs=response.logs,
             search_results=response.search_results,
+            tool_observations=response.tool_observations,
         )
         response.session_id = session.session_id
         response.session_title = session.title
@@ -100,7 +105,7 @@ async def ask_stream(
             raise HTTPException(status_code=404, detail="会话不存在")
 
     uploads = [upload for upload in files if upload.filename]
-    effective_session_id = session_id or (uuid4().hex if uploads else None)
+    effective_session_id = session_id or uuid4().hex
 
     try:
         if uploads:
@@ -133,6 +138,7 @@ async def ask_stream(
                 question,
                 conversation=existing_session.messages if existing_session else [],
                 attachments=attachment_contexts,
+                session_id=effective_session_id,
             ):
                 if event["type"] == "final_response":
                     runtime_response = event["data"]
@@ -144,6 +150,7 @@ async def ask_stream(
                         query=runtime_response.query,
                         logs=runtime_response.logs,
                         search_results=runtime_response.search_results,
+                        tool_observations=runtime_response.tool_observations,
                     )
                     runtime_response.session_id = session.session_id
                     runtime_response.session_title = session.title
@@ -200,16 +207,18 @@ async def list_artifacts(session_id: str) -> list[ArtifactSummary]:
     return artifact_store.list_artifacts(session_id)
 
 
-@app.post("/api/sessions/{session_id}/artifacts", response_model=ArtifactDetail)
-async def create_artifact(session_id: str, payload: dict) -> ArtifactDetail:
+@app.post("/api/sessions/{session_id}/artifacts/save", response_model=ArtifactDetail)
+async def save_artifact(session_id: str, payload: dict) -> ArtifactDetail:
     session = session_store.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     try:
-        return artifact_store.create_artifact(
-            session_id,
-            str(payload.get("title", "")),
-            str(payload.get("content", "")),
+        return save_markdown_artifact(
+            artifact_store,
+            session_id=session_id,
+            title=str(payload.get("title", "")),
+            content=str(payload.get("content", "")),
+            artifact_id=payload.get("artifact_id"),
         )
     except ArtifactStoreError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -221,21 +230,6 @@ async def get_artifact(session_id: str, artifact_id: str) -> ArtifactDetail:
     if detail is None:
         raise HTTPException(status_code=404, detail="文档不存在")
     return detail
-
-
-@app.put("/api/sessions/{session_id}/artifacts/{artifact_id}", response_model=ArtifactDetail)
-async def update_artifact(session_id: str, artifact_id: str, payload: dict) -> ArtifactDetail:
-    try:
-        return artifact_store.update_artifact(
-            session_id,
-            artifact_id,
-            str(payload.get("title", "")),
-            str(payload.get("content", "")),
-        )
-    except ArtifactStoreError as exc:
-        detail = str(exc)
-        status_code = 404 if detail == "文档不存在" else 400
-        raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
 @app.get("/api/sessions/{session_id}/artifacts/{artifact_id}/download")

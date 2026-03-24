@@ -62,6 +62,23 @@ class MarkdownArtifactStore:
         self._write_index(session_dir, index)
         return detail
 
+    def save_artifact(
+        self,
+        session_id: str,
+        title: str,
+        content: str,
+        artifact_id: str | None = None,
+    ) -> ArtifactDetail:
+        target_artifact_id = artifact_id
+        if not target_artifact_id:
+            artifacts = self.list_artifacts(session_id)
+            target_artifact_id = artifacts[0].artifact_id if artifacts else None
+
+        if target_artifact_id:
+            return self.update_artifact(session_id, target_artifact_id, title, content)
+
+        return self.create_artifact(session_id, title, content)
+
     def get_artifact(self, session_id: str, artifact_id: str) -> ArtifactDetail | None:
         session_dir = self._session_dir(session_id)
         index = self._read_index(session_dir)

@@ -35,6 +35,11 @@ class DeepSeekClient:
 
         if action.action == "search" and not (action.query or "").strip():
             raise LLMClientError("LLM 选择 search，但未返回查询词")
+        if action.action == "canvas":
+            if not (action.title or "").strip():
+                raise LLMClientError("LLM 选择 canvas，但未返回文档标题")
+            if not (action.content or "").strip():
+                raise LLMClientError("LLM 选择 canvas，但未返回文档内容")
         if action.action == "final" and not (action.answer or "").strip():
             raise LLMClientError("LLM 选择 final，但未返回最终答案")
         return action
@@ -69,13 +74,19 @@ class DeepSeekClient:
         serialized_conversation = json.dumps(recent_conversation, ensure_ascii=False)
         return (
             "你是一个最小搜索 Agent。你每一轮只能输出一个 JSON 对象，不能输出 Markdown，不能输出额外解释。"
-            "你可用的 action 只有两种："
+            "你可用的 action 有三种："
             '1. {"action":"search","query":"..."} 表示调用搜索工具；'
-            '2. {"action":"final","answer":"..."} 表示直接输出最终答案。'
+            '2. {"action":"canvas","title":"...","content":"..."} 表示调用 Canvas 工具，把内容保存为 Markdown 文档；'
+            '3. {"action":"final","answer":"..."} 表示直接输出最终答案。'
             "如果当前信息不足以可靠回答，你应该优先选择 search。"
-            "如果 history 中已经有搜索结果，你应基于 history 里的结果整理答案，而不是继续盲目搜索。"
+            "history 中存放的是工具执行后的 observation，字段包含 tool、status、message、data。"
+            "你必须根据 history 里的工具 observation 决定下一步。"
+            "如果 history 中已经有成功的搜索结果，你应基于 observation 里的结果整理答案，而不是继续盲目搜索。"
+            "如果某个工具刚刚成功执行，除非用户明确要求再次修改，否则不要重复调用同一个工具。"
+            "如果最近一次 Canvas observation 已经成功保存文档，你下一步应优先输出 final。"
             "如果 conversation 中有历史对话，你应把它当作当前会话记忆；当用户问题依赖上下文时，需要结合这些历史信息理解意图。"
             "如果 attachments 中有附件摘录，你应结合附件内容回答；当附件已经足够回答时，不必强制搜索。"
+            "如果用户明确要求生成、保存、整理成 Markdown 文档、手册、SOP、可下载文档，你应优先选择 canvas。"
             "当搜索结果不足时，可以直接输出带不确定性的 final。"
             f"\n用户问题：{question}"
             f"\n当前 conversation：{serialized_conversation}"

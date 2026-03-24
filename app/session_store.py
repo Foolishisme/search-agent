@@ -11,6 +11,7 @@ from app.schemas import (
     SessionDetail,
     SessionSummary,
     SessionTurn,
+    ToolObservation,
 )
 
 META_PREFIX = "<!-- SEARCH_AGENT_SESSION_META\n"
@@ -65,6 +66,7 @@ class MarkdownSessionStore:
         query: str | None,
         logs: list[RuntimeLog],
         search_results: list[SearchResult],
+        tool_observations: list[ToolObservation],
     ) -> SessionDetail:
         normalized_question = question.strip()
         normalized_answer = answer.strip()
@@ -89,6 +91,7 @@ class MarkdownSessionStore:
                 turns=[],
                 latest_logs=[],
                 latest_search_results=[],
+                latest_tool_observations=[],
             )
 
         turn = SessionTurn(
@@ -99,6 +102,7 @@ class MarkdownSessionStore:
             query=query,
             logs=[RuntimeLog.model_validate(item) for item in logs],
             search_results=[SearchResult.model_validate(item) for item in search_results],
+            tool_observations=[ToolObservation.model_validate(item) for item in tool_observations],
         )
         session.turns.append(turn)
         session.messages = self._messages_from_turns(session.turns)
@@ -107,6 +111,7 @@ class MarkdownSessionStore:
         session.last_message_preview = self._build_preview(normalized_answer)
         session.latest_logs = turn.logs
         session.latest_search_results = turn.search_results
+        session.latest_tool_observations = turn.tool_observations
 
         path = self._path_for(session.session_id)
         path.write_text(self._serialize(session), encoding="utf-8")
@@ -177,6 +182,7 @@ class MarkdownSessionStore:
             turns=turns,
             latest_logs=latest_turn.logs if latest_turn else [],
             latest_search_results=latest_turn.search_results if latest_turn else [],
+            latest_tool_observations=latest_turn.tool_observations if latest_turn else [],
         )
 
     def _parse_meta(self, raw: str) -> dict:
@@ -225,6 +231,7 @@ class MarkdownSessionStore:
                     query=None,
                     logs=[],
                     search_results=[],
+                    tool_observations=[],
                 )
             )
         return turns

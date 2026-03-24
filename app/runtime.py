@@ -3,8 +3,10 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
+from app.artifact_store import ArtifactStoreError
+from app.artifact_tool import save_markdown_artifact
 from app.llm_client import LLMClientError
-from app.schemas import AskResponse, AttachmentContext, ConversationMessage, RuntimeLog
+from app.schemas import AskResponse, AttachmentContext, ConversationMessage, RuntimeLog, ToolObservation
 from app.search_tool import SearchToolError, TavilySearchTool
 
 logger = logging.getLogger(__name__)
@@ -13,18 +15,25 @@ logger = logging.getLogger(__name__)
 class AgentRuntime:
     MAX_STEPS = 4
 
-    def __init__(self, llm_client: Any, search_tool: TavilySearchTool) -> None:
+    def __init__(self, llm_client: Any, search_tool: TavilySearchTool, artifact_store: Any) -> None:
         self.llm_client = llm_client
         self.search_tool = search_tool
+        self.artifact_store = artifact_store
 
     async def run(
         self,
         question: str,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
+        session_id: str | None = None,
     ) -> AskResponse:
         final_response: AskResponse | None = None
-        async for event in self.run_stream(question, conversation=conversation, attachments=attachments):
+        async for event in self.run_stream(
+            question,
+            conversation=conversation,
+            attachments=attachments,
+            session_id=session_id,
+        ):
             if event["type"] == "final_response":
                 final_response = event["data"]
         if final_response is None:
@@ -36,9 +45,10 @@ class AgentRuntime:
         question: str,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
+        session_id: str | None = None,
     ) -> AsyncIterator[dict]:
         logs: list[RuntimeLog] = []
-        history: list[dict] = []
+        tool_observations: list[ToolObservation] = []
         aggregated_results = []
         latest_query: str | None = None
         conversation = conversation or []
@@ -57,7 +67,7 @@ class AgentRuntime:
             try:
                 action = await self.llm_client.next_action(
                     normalized_question,
-                    history,
+                    [item.model_dump(mode="json") for item in tool_observations],
                     conversation,
                     attachments,
                 )
@@ -90,11 +100,56 @@ class AgentRuntime:
                         query=latest_query,
                         search_results=aggregated_results,
                         logs=logs,
+                        tool_observations=tool_observations,
                         conversation=[],
                         attachments=[],
                     ),
                 }
                 return
+
+            if action.action == "canvas":
+                if not session_id:
+                    raise RuntimeError("Canvas 工具需要有效的会话 ID")
+                try:
+                    artifact = save_markdown_artifact(
+                        self.artifact_store,
+                        session_id=session_id,
+                        title=(action.title or "").strip(),
+                        content=(action.content or "").strip(),
+                    )
+                except ArtifactStoreError as exc:
+                    error_log = RuntimeLog(stage="error", message=f"第 {step} 轮 Canvas 执行失败：{exc}")
+                    logs.append(error_log)
+                    error_observation = ToolObservation(
+                        step=step,
+                        tool="canvas",
+                        status="error",
+                        message=str(exc),
+                        data={"title": (action.title or "").strip()},
+                    )
+                    tool_observations.append(error_observation)
+                    yield {"type": "log", "log": error_log}
+                    yield {"type": "tool_result", "result": error_observation.model_dump(mode="json")}
+                    raise RuntimeError(str(exc)) from exc
+                canvas_log = RuntimeLog(stage="canvas", message=f"第 {step} 轮已保存 Markdown 文档：{artifact.title}")
+                logs.append(canvas_log)
+                observation = ToolObservation(
+                    step=step,
+                    tool="canvas",
+                    status="success",
+                    message="Canvas 工具已成功保存 Markdown 文档",
+                    data={
+                        "title": artifact.title,
+                        "artifact_id": artifact.artifact_id,
+                        "filename": artifact.filename,
+                    },
+                )
+                tool_observations.append(observation)
+                yield {"type": "log", "log": canvas_log}
+                yield {"type": "tool_result", "result": observation.model_dump(mode="json")}
+                yield {"type": "status", "message": f"已使用 Canvas 工具保存文档：{artifact.title}"}
+                yield {"type": "canvas", "artifact": artifact.model_dump(mode="json")}
+                continue
 
             query = (action.query or "").strip()
             latest_query = query
@@ -109,22 +164,36 @@ class AgentRuntime:
             except SearchToolError as exc:
                 error_log = RuntimeLog(stage="error", message=f"第 {step} 轮搜索失败：{exc}")
                 logs.append(error_log)
+                error_observation = ToolObservation(
+                    step=step,
+                    tool="search",
+                    status="error",
+                    message=str(exc),
+                    data={"query": query},
+                )
+                tool_observations.append(error_observation)
                 yield {"type": "log", "log": error_log}
+                yield {"type": "tool_result", "result": error_observation.model_dump(mode="json")}
                 raise RuntimeError(str(exc)) from exc
 
             aggregated_results = results
-            history.append(
-                {
-                    "step": step,
-                    "action": "search",
+            observation = ToolObservation(
+                step=step,
+                tool="search",
+                status="success",
+                message="搜索工具执行成功",
+                data={
                     "query": query,
-                    "results": [item.model_dump() for item in results],
-                }
+                    "results_count": len(results),
+                    "results": [item.model_dump(mode="json") for item in results],
+                },
             )
+            tool_observations.append(observation)
             result_log = RuntimeLog(stage="search", message=f"第 {step} 轮搜索返回条数：{len(results)}")
             logs.append(result_log)
             logger.info("第 %s 轮搜索完成 count=%s", step, len(results))
             yield {"type": "log", "log": result_log}
+            yield {"type": "tool_result", "result": observation.model_dump(mode="json")}
             yield {"type": "results", "results": [item.model_dump(mode='json') for item in results]}
 
             if not results:

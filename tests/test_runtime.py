@@ -1,5 +1,8 @@
+import tempfile
 import unittest
+from pathlib import Path
 
+from app.artifact_store import MarkdownArtifactStore
 from app.llm_client import LLMClientError
 from app.runtime import AgentRuntime
 from app.schemas import AgentAction, AttachmentContext, ConversationMessage, SearchResult
@@ -45,10 +48,18 @@ class FakeSearchTool:
 
 
 class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.artifact_store = MarkdownArtifactStore(Path(self.tempdir.name))
+
+    def tearDown(self) -> None:
+        self.tempdir.cleanup()
+
     async def test_direct_final_without_search(self):
         runtime = AgentRuntime(
             llm_client=FakeLLMClient(actions=[AgentAction(action="final", answer="直接答案")]),
             search_tool=FakeSearchTool(),
+            artifact_store=self.artifact_store,
         )
 
         response = await runtime.run("1+1等于几")
@@ -70,7 +81,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         search_tool = FakeSearchTool(results=[results])
-        runtime = AgentRuntime(llm_client=llm_client, search_tool=search_tool)
+        runtime = AgentRuntime(llm_client=llm_client, search_tool=search_tool, artifact_store=self.artifact_store)
 
         response = await runtime.run("帮我查一下 AI Agent runtime")
 
@@ -80,8 +91,10 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.answer, "基于搜索结果的最终答案")
         self.assertEqual(search_tool.queries, ["AI Agent runtime"])
         self.assertEqual(llm_client.histories[0], [])
-        self.assertEqual(llm_client.histories[1][0]["query"], "AI Agent runtime")
-        self.assertEqual(llm_client.histories[1][0]["results"][0]["title"], "标题")
+        self.assertEqual(llm_client.histories[1][0]["tool"], "search")
+        self.assertEqual(llm_client.histories[1][0]["status"], "success")
+        self.assertEqual(llm_client.histories[1][0]["data"]["query"], "AI Agent runtime")
+        self.assertEqual(llm_client.histories[1][0]["data"]["results"][0]["title"], "标题")
         self.assertEqual(llm_client.conversations[0], [])
 
     async def test_search_empty_results_then_final(self):
@@ -91,7 +104,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 AgentAction(action="final", answer="未找到充分信息，暂时无法确认。"),
             ]
         )
-        runtime = AgentRuntime(llm_client=llm_client, search_tool=FakeSearchTool(results=[[]]))
+        runtime = AgentRuntime(llm_client=llm_client, search_tool=FakeSearchTool(results=[[]]), artifact_store=self.artifact_store)
 
         response = await runtime.run("请查一个很冷门的问题")
 
@@ -112,6 +125,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 ]
             ),
             search_tool=FakeSearchTool(results=[[], [], [], []]),
+            artifact_store=self.artifact_store,
         )
 
         with self.assertRaises(RuntimeError) as context:
@@ -123,6 +137,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         runtime = AgentRuntime(
             llm_client=FakeLLMClient(error=LLMClientError("LLM 异常")),
             search_tool=FakeSearchTool(),
+            artifact_store=self.artifact_store,
         )
 
         with self.assertRaises(RuntimeError) as context:
@@ -134,6 +149,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         runtime = AgentRuntime(
             llm_client=FakeLLMClient(actions=[AgentAction(action="search", query="test")]),
             search_tool=FakeSearchTool(error=SearchToolError("搜索异常")),
+            artifact_store=self.artifact_store,
         )
 
         with self.assertRaises(RuntimeError) as context:
@@ -145,6 +161,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         runtime = AgentRuntime(
             llm_client=FakeLLMClient(actions=[AgentAction(action="final", answer="ignored")]),
             search_tool=FakeSearchTool(),
+            artifact_store=self.artifact_store,
         )
 
         with self.assertRaises(ValueError) as context:
@@ -157,6 +174,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         runtime = AgentRuntime(
             llm_client=llm_client,
             search_tool=FakeSearchTool(),
+            artifact_store=self.artifact_store,
         )
         conversation = [
             ConversationMessage(role="user", content="我们刚才在聊 LangGraph", created_at="2026-03-24T10:00:00+08:00"),
@@ -181,6 +199,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             search_tool=FakeSearchTool(
                 results=[[SearchResult(title="标题", snippet="摘要", url="https://example.com")]]
             ),
+            artifact_store=self.artifact_store,
         )
 
         events = []
@@ -188,6 +207,31 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             events.append(event)
 
         self.assertEqual(events[0]["type"], "status")
+        self.assertTrue(any(item["type"] == "tool_result" for item in events))
         self.assertTrue(any(item["type"] == "results" for item in events))
         self.assertEqual(events[-1]["type"], "final_response")
         self.assertEqual(events[-1]["data"].answer, "流式最终答案")
+
+    async def test_canvas_action_saves_artifact_then_final(self):
+        llm_client = FakeLLMClient(
+            actions=[
+                AgentAction(action="canvas", title="操作手册", content="# 操作手册\n\n步骤一"),
+                AgentAction(action="final", answer="我已经保存为 Markdown 文档。"),
+            ]
+        )
+        runtime = AgentRuntime(
+            llm_client=llm_client,
+            search_tool=FakeSearchTool(),
+            artifact_store=self.artifact_store,
+        )
+
+        events = []
+        async for event in runtime.run_stream("整理成文档", session_id="session-1"):
+            events.append(event)
+
+        self.assertTrue(any(item["type"] == "canvas" for item in events))
+        final_event = events[-1]
+        self.assertEqual(final_event["type"], "final_response")
+        artifacts = self.artifact_store.list_artifacts("session-1")
+        self.assertEqual(len(artifacts), 1)
+        self.assertEqual(artifacts[0].title, "操作手册")

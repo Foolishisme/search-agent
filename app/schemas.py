@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -15,14 +15,24 @@ class SearchResult(BaseModel):
 
 
 class AgentAction(BaseModel):
-    action: Literal["search", "final"]
+    action: Literal["search", "canvas", "final"]
     query: str | None = None
     answer: str | None = None
+    title: str | None = None
+    content: str | None = None
 
 
 class RuntimeLog(BaseModel):
-    stage: Literal["input", "thought", "search", "final", "error"]
+    stage: Literal["input", "thought", "search", "canvas", "final", "error"]
     message: str
+
+
+class ToolObservation(BaseModel):
+    step: int
+    tool: Literal["search", "canvas"]
+    status: Literal["success", "error"]
+    message: str
+    data: dict[str, Any] = Field(default_factory=dict)
 
 
 class ConversationMessage(BaseModel):
@@ -65,6 +75,7 @@ class SessionTurn(BaseModel):
     query: str | None = None
     logs: list[RuntimeLog] = Field(default_factory=list)
     search_results: list[SearchResult] = Field(default_factory=list)
+    tool_observations: list[ToolObservation] = Field(default_factory=list)
 
 
 class SessionSummary(BaseModel):
@@ -81,6 +92,7 @@ class SessionDetail(SessionSummary):
     turns: list[SessionTurn] = Field(default_factory=list)
     latest_logs: list[RuntimeLog] = Field(default_factory=list)
     latest_search_results: list[SearchResult] = Field(default_factory=list)
+    latest_tool_observations: list[ToolObservation] = Field(default_factory=list)
     attachments: list[AttachmentMeta] = Field(default_factory=list)
 
 
@@ -92,5 +104,6 @@ class AskResponse(BaseModel):
     query: str | None = None
     search_results: list[SearchResult] = Field(default_factory=list)
     logs: list[RuntimeLog] = Field(default_factory=list)
+    tool_observations: list[ToolObservation] = Field(default_factory=list)
     conversation: list[ConversationMessage] = Field(default_factory=list)
     attachments: list[AttachmentMeta] = Field(default_factory=list)

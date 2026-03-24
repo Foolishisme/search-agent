@@ -367,6 +367,13 @@
             padding: 16px;
         }
 
+        .tool-tags {
+            margin-top: 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
         .answer-markdown,
         .markdown-content {
             color: var(--text);
@@ -700,6 +707,10 @@
                         <div>
                             <h1>最小搜索 Agent MVP</h1>
                             <p id="session-meta" class="meta">当前会话：新会话</p>
+                            <div class="tool-tags">
+                                <span class="attachment-chip">Canvas Tool</span>
+                                <span id="canvas-used-tag" class="attachment-chip hidden">已使用 Canvas 工具</span>
+                            </div>
                         </div>
                         <button id="delete-session" class="danger" disabled>删除记忆</button>
                     </div>
@@ -828,6 +839,7 @@
         const sessionMetaElement = document.getElementById('session-meta');
         const sessionAttachmentsElement = document.getElementById('session-attachments');
         const pendingAttachmentsElement = document.getElementById('pending-attachments');
+        const canvasUsedTag = document.getElementById('canvas-used-tag');
         const createArtifactButton = document.getElementById('create-artifact');
         const artifactListElement = document.getElementById('artifact-list');
         const artifactEditorElement = document.getElementById('artifact-editor');
@@ -855,6 +867,11 @@
             sessionMetaElement.textContent = `当前会话：${currentSessionTitle}`;
             deleteSessionButton.disabled = !currentSessionId;
             createArtifactButton.disabled = !(currentSessionId && latestAnswerMarkdown.trim());
+        }
+
+        function setCanvasUsed(toolObservations) {
+            const used = (toolObservations || []).some((item) => item.tool === 'canvas' && item.status === 'success');
+            canvasUsedTag.classList.toggle('hidden', !used);
         }
 
         function resetArtifactEditor() {
@@ -966,6 +983,7 @@
             renderResults([]);
             statusElement.textContent = '';
             errorElement.textContent = '';
+            setCanvasUsed([]);
         }
 
         function startNewSession() {
@@ -1200,6 +1218,7 @@
                 renderResults(data.latest_search_results || []);
                 renderSources(data.latest_search_results || []);
                 renderSessionAttachments(data.attachments || []);
+                setCanvasUsed(data.latest_tool_observations || []);
                 await loadArtifacts(data.session_id);
                 statusElement.textContent = `已加载会话：${data.title}`;
                 await loadSessions();
@@ -1271,6 +1290,7 @@
                 const decoder = new TextDecoder();
                 let buffer = '';
                 let liveLogs = [];
+                let liveToolObservations = [];
 
                 while (true) {
                     const { value, done } = await reader.read();
@@ -1294,6 +1314,9 @@
                             liveLogs.push(event.log);
                             renderLogs(liveLogs);
                             logsPanel.open = true;
+                        } else if (event.type === 'tool_result') {
+                            liveToolObservations.push(event.result);
+                            setCanvasUsed(liveToolObservations);
                         } else if (event.type === 'results') {
                             renderResults(event.results || []);
                             renderSources(event.results || []);
@@ -1314,6 +1337,7 @@
                             renderResults(data.search_results || []);
                             renderSources(data.search_results || []);
                             renderSessionAttachments(data.attachments || []);
+                            setCanvasUsed(data.tool_observations || []);
                             statusElement.textContent = data.need_search
                                 ? `已完成，触发搜索：${data.query || ''}`
                                 : '已完成，未触发搜索';
@@ -1367,7 +1391,7 @@
                 return;
             }
             try {
-                const response = await fetch(`/api/sessions/${currentSessionId}/artifacts`, {
+                const response = await fetch(`/api/sessions/${currentSessionId}/artifacts/save`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1390,12 +1414,13 @@
                 return;
             }
             try {
-                const response = await fetch(`/api/sessions/${currentSessionId}/artifacts/${currentArtifactId}`, {
-                    method: 'PUT',
+                const response = await fetch(`/api/sessions/${currentSessionId}/artifacts/save`, {
+                    method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         title: artifactTitleInput.value,
                         content: artifactContentInput.value,
+                        artifact_id: currentArtifactId,
                     }),
                 });
                 const data = await response.json();

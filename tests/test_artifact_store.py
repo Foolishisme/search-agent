@@ -34,3 +34,11 @@ class ArtifactStoreTests(unittest.TestCase):
     def test_rejects_empty_content(self):
         with self.assertRaises(ArtifactStoreError):
             self.store.create_artifact("session-1", "示例文档", "   ")
+
+    def test_save_artifact_creates_then_updates_latest(self):
+        created = self.store.save_artifact("session-1", "第一次标题", "第一次内容")
+        updated = self.store.save_artifact("session-1", "第二次标题", "第二次内容")
+
+        self.assertEqual(created.artifact_id, updated.artifact_id)
+        self.assertEqual(updated.title, "第二次标题")
+        self.assertEqual(updated.content, "第二次内容")

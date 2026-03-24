@@ -9,7 +9,7 @@ import app.main as app_main
 from app.attachment_store import AttachmentStore
 from app.artifact_store import MarkdownArtifactStore
 from app.main import app
-from app.schemas import AskResponse, RuntimeLog, SearchResult
+from app.schemas import AskResponse, RuntimeLog, SearchResult, ToolObservation
 from app.session_store import MarkdownSessionStore
 
 
@@ -19,6 +19,7 @@ class ApiTests(unittest.TestCase):
         app_main.session_store = MarkdownSessionStore(Path(self.tempdir.name))
         app_main.attachment_store = AttachmentStore(Path(self.tempdir.name) / "uploads")
         app_main.artifact_store = MarkdownArtifactStore(Path(self.tempdir.name) / "artifacts")
+        app_main.runtime.artifact_store = app_main.artifact_store
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -36,6 +37,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn('id="results-panel"', response.text)
         self.assertIn('id="create-artifact"', response.text)
         self.assertIn('id="download-artifact"', response.text)
+        self.assertIn("Canvas Tool", response.text)
 
     def test_favicon(self):
         response = self.client.get("/favicon.ico")
@@ -132,6 +134,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(detail["messages"][0]["content"], "第一轮问题")
         self.assertEqual(detail["latest_logs"][0]["message"], "done")
         self.assertEqual(detail["latest_search_results"][0]["title"], "标题")
+        self.assertEqual(detail["latest_tool_observations"], [])
 
         delete_response = self.client.delete(f"/api/sessions/{session_id}")
         self.assertEqual(delete_response.status_code, 204)
@@ -201,6 +204,37 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(detail["attachments"]), 1)
         self.assertEqual(detail["attachments"][0]["filename"], "memo.md")
 
+    def test_tool_observations_persist_on_session_detail(self):
+        fake_response = AskResponse(
+            session_id="",
+            session_title="",
+            answer="已完成",
+            need_search=True,
+            query="桥 绝句",
+            logs=[RuntimeLog(stage="search", message="第 1 轮搜索返回条数：1")],
+            search_results=[SearchResult(title="标题", snippet="摘要", url="https://example.com")],
+            tool_observations=[
+                ToolObservation(
+                    step=1,
+                    tool="search",
+                    status="success",
+                    message="搜索工具执行成功",
+                    data={"query": "桥 绝句", "results_count": 1},
+                )
+            ],
+            conversation=[],
+            attachments=[],
+        )
+
+        with patch("app.main.runtime.run", new=AsyncMock(return_value=fake_response)):
+            ask_response = self.client.post("/api/ask", json={"question": "写一首桥的绝句"})
+
+        session_id = ask_response.json()["session_id"]
+        detail_response = self.client.get(f"/api/sessions/{session_id}")
+        detail = detail_response.json()
+        self.assertEqual(detail["latest_tool_observations"][0]["tool"], "search")
+        self.assertEqual(detail["latest_tool_observations"][0]["status"], "success")
+
     def test_artifact_endpoints(self):
         fake_response = AskResponse(
             session_id="",
@@ -217,7 +251,7 @@ class ApiTests(unittest.TestCase):
         session_id = ask_response.json()["session_id"]
 
         create_response = self.client.post(
-            f"/api/sessions/{session_id}/artifacts",
+            f"/api/sessions/{session_id}/artifacts/save",
             json={"title": "会议纪要", "content": "# 会议纪要\n\n第一条"},
         )
         self.assertEqual(create_response.status_code, 200)
@@ -232,11 +266,12 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(detail_response.status_code, 200)
         self.assertEqual(detail_response.json()["content"], "# 会议纪要\n\n第一条")
 
-        update_response = self.client.put(
-            f"/api/sessions/{session_id}/artifacts/{artifact_id}",
+        update_response = self.client.post(
+            f"/api/sessions/{session_id}/artifacts/save",
             json={"title": "更新后的纪要", "content": "# 更新后的纪要\n\n第二条"},
         )
         self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.json()["artifact_id"], artifact_id)
         self.assertEqual(update_response.json()["title"], "更新后的纪要")
 
         download_response = self.client.get(f"/api/sessions/{session_id}/artifacts/{artifact_id}/download")
