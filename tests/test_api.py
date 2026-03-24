@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 import app.main as app_main
 from app.attachment_store import AttachmentStore
+from app.artifact_store import MarkdownArtifactStore
 from app.main import app
 from app.schemas import AskResponse, RuntimeLog, SearchResult
 from app.session_store import MarkdownSessionStore
@@ -17,6 +18,7 @@ class ApiTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         app_main.session_store = MarkdownSessionStore(Path(self.tempdir.name))
         app_main.attachment_store = AttachmentStore(Path(self.tempdir.name) / "uploads")
+        app_main.artifact_store = MarkdownArtifactStore(Path(self.tempdir.name) / "artifacts")
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -32,6 +34,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn('class="floating-composer"', response.text)
         self.assertIn('id="logs-panel"', response.text)
         self.assertIn('id="results-panel"', response.text)
+        self.assertIn('id="create-artifact"', response.text)
+        self.assertIn('id="download-artifact"', response.text)
 
     def test_favicon(self):
         response = self.client.get("/favicon.ico")
@@ -196,3 +200,46 @@ class ApiTests(unittest.TestCase):
         detail = detail_response.json()
         self.assertEqual(len(detail["attachments"]), 1)
         self.assertEqual(detail["attachments"][0]["filename"], "memo.md")
+
+    def test_artifact_endpoints(self):
+        fake_response = AskResponse(
+            session_id="",
+            session_title="",
+            answer="# 会议纪要\n\n第一条",
+            need_search=False,
+            logs=[RuntimeLog(stage="final", message="done")],
+            conversation=[],
+            attachments=[],
+        )
+        with patch("app.main.runtime.run", new=AsyncMock(return_value=fake_response)):
+            ask_response = self.client.post("/api/ask", json={"question": "请整理一下"})
+
+        session_id = ask_response.json()["session_id"]
+
+        create_response = self.client.post(
+            f"/api/sessions/{session_id}/artifacts",
+            json={"title": "会议纪要", "content": "# 会议纪要\n\n第一条"},
+        )
+        self.assertEqual(create_response.status_code, 200)
+        artifact = create_response.json()
+        artifact_id = artifact["artifact_id"]
+
+        list_response = self.client.get(f"/api/sessions/{session_id}/artifacts")
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(len(list_response.json()), 1)
+
+        detail_response = self.client.get(f"/api/sessions/{session_id}/artifacts/{artifact_id}")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.json()["content"], "# 会议纪要\n\n第一条")
+
+        update_response = self.client.put(
+            f"/api/sessions/{session_id}/artifacts/{artifact_id}",
+            json={"title": "更新后的纪要", "content": "# 更新后的纪要\n\n第二条"},
+        )
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.json()["title"], "更新后的纪要")
+
+        download_response = self.client.get(f"/api/sessions/{session_id}/artifacts/{artifact_id}/download")
+        self.assertEqual(download_response.status_code, 200)
+        self.assertIn("attachment;", download_response.headers["content-disposition"])
+        self.assertIn("更新后的纪要", download_response.text)

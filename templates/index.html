@@ -302,6 +302,71 @@
             gap: 18px;
         }
 
+        .artifact-shell {
+            border-top: 1px solid var(--line);
+            padding-top: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .artifact-head,
+        .artifact-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .artifact-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .artifact-item {
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            padding: 8px 12px;
+            background: #fffdfa;
+            color: var(--text);
+            cursor: pointer;
+        }
+
+        .artifact-item.active {
+            border-color: var(--accent);
+            background: rgba(47, 111, 237, 0.08);
+        }
+
+        .artifact-editor {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .artifact-input,
+        .artifact-content {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: #fffdfa;
+            color: var(--text);
+            padding: 12px 14px;
+            font: inherit;
+        }
+
+        .artifact-content {
+            min-height: 220px;
+            resize: vertical;
+        }
+
+        .artifact-preview {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: #fffdfa;
+            padding: 16px;
+        }
+
         .answer-markdown,
         .markdown-content {
             color: var(--text);
@@ -666,6 +731,27 @@
                             </div>
                             <div id="sources-list" class="source-list"></div>
                         </div>
+                        <div class="artifact-shell">
+                            <div class="artifact-head">
+                                <div>
+                                    <h3>Markdown 文档</h3>
+                                    <p class="meta">把当前答案转成可编辑文档。</p>
+                                </div>
+                                <button id="create-artifact" class="secondary small" type="button" disabled>生成 MD</button>
+                            </div>
+                            <div id="artifact-list" class="artifact-list">
+                                <span class="placeholder">当前会话还没有文档。</span>
+                            </div>
+                            <div id="artifact-editor" class="artifact-editor hidden">
+                                <input id="artifact-title" class="artifact-input" type="text" placeholder="文档标题" />
+                                <textarea id="artifact-content" class="artifact-content" placeholder="Markdown 内容"></textarea>
+                                <div class="artifact-actions">
+                                    <button id="save-artifact" type="button">保存文档</button>
+                                    <a id="download-artifact" class="secondary small" href="#" download>下载 MD</a>
+                                </div>
+                                <div id="artifact-preview" class="artifact-preview markdown-content"></div>
+                            </div>
+                        </div>
                     </div>
                 </section>
 
@@ -742,10 +828,20 @@
         const sessionMetaElement = document.getElementById('session-meta');
         const sessionAttachmentsElement = document.getElementById('session-attachments');
         const pendingAttachmentsElement = document.getElementById('pending-attachments');
+        const createArtifactButton = document.getElementById('create-artifact');
+        const artifactListElement = document.getElementById('artifact-list');
+        const artifactEditorElement = document.getElementById('artifact-editor');
+        const artifactTitleInput = document.getElementById('artifact-title');
+        const artifactContentInput = document.getElementById('artifact-content');
+        const artifactPreviewElement = document.getElementById('artifact-preview');
+        const saveArtifactButton = document.getElementById('save-artifact');
+        const downloadArtifactLink = document.getElementById('download-artifact');
 
         let currentSessionId = null;
         let currentSessionTitle = '新会话';
         let pendingFiles = [];
+        let latestAnswerMarkdown = '';
+        let currentArtifactId = null;
 
         function escapeHtml(value) {
             return value
@@ -758,6 +854,38 @@
         function setSessionMeta() {
             sessionMetaElement.textContent = `当前会话：${currentSessionTitle}`;
             deleteSessionButton.disabled = !currentSessionId;
+            createArtifactButton.disabled = !(currentSessionId && latestAnswerMarkdown.trim());
+        }
+
+        function resetArtifactEditor() {
+            currentArtifactId = null;
+            artifactEditorElement.classList.add('hidden');
+            artifactTitleInput.value = '';
+            artifactContentInput.value = '';
+            artifactPreviewElement.innerHTML = '<p class="placeholder">请选择文档。</p>';
+            downloadArtifactLink.href = '#';
+            downloadArtifactLink.setAttribute('download', 'document.md');
+        }
+
+        function renderArtifactPreview() {
+            artifactPreviewElement.innerHTML = renderMarkdown(artifactContentInput.value);
+        }
+
+        function renderArtifactList(artifacts) {
+            artifactListElement.innerHTML = '';
+            if (!artifacts.length) {
+                artifactListElement.innerHTML = '<span class="placeholder">当前会话还没有文档。</span>';
+                return;
+            }
+
+            artifacts.forEach((artifact) => {
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = `artifact-item${artifact.artifact_id === currentArtifactId ? ' active' : ''}`;
+                item.textContent = artifact.title;
+                item.addEventListener('click', () => loadArtifact(artifact.artifact_id));
+                artifactListElement.appendChild(item);
+            });
         }
 
         function renderSessionAttachments(attachments) {
@@ -845,11 +973,14 @@
             currentSessionTitle = '新会话';
             questionInput.value = '';
             pendingFiles = [];
+            latestAnswerMarkdown = '';
             conversationElement.innerHTML = '<div class="placeholder">还没有对话记录，发送第一条消息后会自动创建会话。</div>';
             resetRoundOutput();
             setSessionMeta();
             renderSessionAttachments([]);
             renderPendingFiles();
+            renderArtifactList([]);
+            resetArtifactEditor();
         }
 
         function renderLogs(logs) {
@@ -971,6 +1102,53 @@
             }
         }
 
+        async function loadArtifacts(sessionId, { openLatest = false } = {}) {
+            if (!sessionId) {
+                renderArtifactList([]);
+                resetArtifactEditor();
+                return;
+            }
+
+            const response = await fetch(`/api/sessions/${sessionId}/artifacts`);
+            if (!response.ok) {
+                throw new Error('加载文档失败');
+            }
+            const artifacts = await response.json();
+            renderArtifactList(artifacts);
+            if (!artifacts.length) {
+                resetArtifactEditor();
+                return;
+            }
+
+            if (openLatest || !currentArtifactId || !artifacts.some((item) => item.artifact_id === currentArtifactId)) {
+                await loadArtifact(artifacts[0].artifact_id);
+            } else {
+                renderArtifactList(artifacts);
+            }
+        }
+
+        async function loadArtifact(artifactId) {
+            if (!currentSessionId) {
+                return;
+            }
+            const response = await fetch(`/api/sessions/${currentSessionId}/artifacts/${artifactId}`);
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || '加载文档失败');
+            }
+            currentArtifactId = data.artifact_id;
+            artifactEditorElement.classList.remove('hidden');
+            artifactTitleInput.value = data.title;
+            artifactContentInput.value = data.content;
+            downloadArtifactLink.href = `/api/sessions/${currentSessionId}/artifacts/${artifactId}/download`;
+            downloadArtifactLink.setAttribute('download', data.filename);
+            renderArtifactPreview();
+            const listResponse = await fetch(`/api/sessions/${currentSessionId}/artifacts`);
+            if (listResponse.ok) {
+                renderArtifactList(await listResponse.json());
+            }
+        }
+
         function renderSessionList(sessions) {
             sessionListElement.innerHTML = '';
             if (!sessions.length) {
@@ -1010,6 +1188,9 @@
 
                 currentSessionId = data.session_id;
                 currentSessionTitle = data.title;
+                latestAnswerMarkdown = data.messages?.length
+                    ? String(data.messages[data.messages.length - 1].content || '')
+                    : '';
                 setSessionMeta();
                 renderConversation(data.messages || []);
                 answerElement.innerHTML = data.messages?.length
@@ -1019,6 +1200,7 @@
                 renderResults(data.latest_search_results || []);
                 renderSources(data.latest_search_results || []);
                 renderSessionAttachments(data.attachments || []);
+                await loadArtifacts(data.session_id);
                 statusElement.textContent = `已加载会话：${data.title}`;
                 await loadSessions();
             } catch (error) {
@@ -1124,6 +1306,7 @@
                             const data = event.data;
                             currentSessionId = data.session_id;
                             currentSessionTitle = data.session_title;
+                            latestAnswerMarkdown = data.answer || '';
                             setSessionMeta();
                             answerElement.innerHTML = renderMarkdown(data.answer);
                             renderConversation(data.conversation || []);
@@ -1137,6 +1320,7 @@
                             questionInput.value = '';
                             pendingFiles = [];
                             renderPendingFiles();
+                            await loadArtifacts(data.session_id);
                             await loadSessions();
                         } else if (event.type === 'error') {
                             throw new Error(event.message || '发生未知错误');
@@ -1175,6 +1359,58 @@
             if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
                 event.preventDefault();
                 handleSubmit();
+            }
+        });
+        artifactContentInput.addEventListener('input', renderArtifactPreview);
+        createArtifactButton.addEventListener('click', async () => {
+            if (!currentSessionId || !latestAnswerMarkdown.trim()) {
+                return;
+            }
+            try {
+                const response = await fetch(`/api/sessions/${currentSessionId}/artifacts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: `${currentSessionTitle} 文档`,
+                        content: latestAnswerMarkdown,
+                    }),
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.detail || '创建文档失败');
+                }
+                currentArtifactId = data.artifact_id;
+                await loadArtifacts(currentSessionId, { openLatest: true });
+            } catch (error) {
+                errorElement.textContent = error.message || '创建文档失败';
+            }
+        });
+        saveArtifactButton.addEventListener('click', async () => {
+            if (!currentSessionId || !currentArtifactId) {
+                return;
+            }
+            try {
+                const response = await fetch(`/api/sessions/${currentSessionId}/artifacts/${currentArtifactId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: artifactTitleInput.value,
+                        content: artifactContentInput.value,
+                    }),
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.detail || '保存文档失败');
+                }
+                currentArtifactId = data.artifact_id;
+                artifactTitleInput.value = data.title;
+                artifactContentInput.value = data.content;
+                downloadArtifactLink.href = `/api/sessions/${currentSessionId}/artifacts/${currentArtifactId}/download`;
+                downloadArtifactLink.setAttribute('download', data.filename);
+                renderArtifactPreview();
+                await loadArtifacts(currentSessionId);
+            } catch (error) {
+                errorElement.textContent = error.message || '保存文档失败';
             }
         });
 

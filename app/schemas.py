@@ -44,6 +44,19 @@ class AttachmentContext(AttachmentMeta):
     content: str
 
 
+class ArtifactSummary(BaseModel):
+    artifact_id: str
+    session_id: str
+    title: str
+    filename: str
+    created_at: str
+    updated_at: str
+
+
+class ArtifactDetail(ArtifactSummary):
+    content: str
+
+
 class SessionTurn(BaseModel):
     created_at: str
     question: str

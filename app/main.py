@@ -3,16 +3,17 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.attachment_store import AttachmentStore, AttachmentStoreError
+from app.artifact_store import ArtifactStoreError, MarkdownArtifactStore
 from app.config import get_settings
 from app.llm_client import DeepSeekClient
 from app.logger import setup_logger
 from app.runtime import AgentRuntime
-from app.schemas import AskRequest, AskResponse, SessionDetail, SessionSummary
+from app.schemas import ArtifactDetail, ArtifactSummary, AskRequest, AskResponse, SessionDetail, SessionSummary
 from app.session_store import MarkdownSessionStore, SessionStoreError
 from app.search_tool import TavilySearchTool
 
@@ -25,6 +26,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "templates")), name="static")
 session_store = MarkdownSessionStore(BASE_DIR / "target" / "sessions")
 attachment_store = AttachmentStore(BASE_DIR / "target" / "uploads")
+artifact_store = MarkdownArtifactStore(BASE_DIR / "target" / "artifacts")
 
 runtime = AgentRuntime(
     llm_client=DeepSeekClient(settings),
@@ -186,7 +188,66 @@ async def delete_session(session_id: str) -> Response:
     if not session_store.delete_session(session_id):
         raise HTTPException(status_code=404, detail="会话不存在")
     attachment_store.delete_session(session_id)
+    artifact_store.delete_session(session_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/api/sessions/{session_id}/artifacts", response_model=list[ArtifactSummary])
+async def list_artifacts(session_id: str) -> list[ArtifactSummary]:
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return artifact_store.list_artifacts(session_id)
+
+
+@app.post("/api/sessions/{session_id}/artifacts", response_model=ArtifactDetail)
+async def create_artifact(session_id: str, payload: dict) -> ArtifactDetail:
+    session = session_store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    try:
+        return artifact_store.create_artifact(
+            session_id,
+            str(payload.get("title", "")),
+            str(payload.get("content", "")),
+        )
+    except ArtifactStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/sessions/{session_id}/artifacts/{artifact_id}", response_model=ArtifactDetail)
+async def get_artifact(session_id: str, artifact_id: str) -> ArtifactDetail:
+    detail = artifact_store.get_artifact(session_id, artifact_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    return detail
+
+
+@app.put("/api/sessions/{session_id}/artifacts/{artifact_id}", response_model=ArtifactDetail)
+async def update_artifact(session_id: str, artifact_id: str, payload: dict) -> ArtifactDetail:
+    try:
+        return artifact_store.update_artifact(
+            session_id,
+            artifact_id,
+            str(payload.get("title", "")),
+            str(payload.get("content", "")),
+        )
+    except ArtifactStoreError as exc:
+        detail = str(exc)
+        status_code = 404 if detail == "文档不存在" else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+
+@app.get("/api/sessions/{session_id}/artifacts/{artifact_id}/download")
+async def download_artifact(session_id: str, artifact_id: str) -> FileResponse:
+    artifact_path = artifact_store.get_artifact_path(session_id, artifact_id)
+    if artifact_path is None or not artifact_path.exists():
+        raise HTTPException(status_code=404, detail="文档不存在")
+    return FileResponse(
+        artifact_path,
+        media_type="text/markdown; charset=utf-8",
+        filename=artifact_path.name,
+    )
 
 
 def _json_line(payload: dict) -> str:

@@ -1,0 +1,364 @@
+AI 时代软件⼯程重温清单
+⽬标：不是回顾⼀遍传统软件⼯程名词，⽽是把能将概率性  LLM 装进可控系统的核⼼能⼒重
+新建⽴起来。
+原则：先  runtime ，后框架；先系统，后技巧；先可控，后炫技。
+⼀、总⽬标
+完成这份清单后，你应该能做到：
+⼆、复习优先级总览
+P0 ：必须优先重温
+P1 ：紧随其后
+P2 ：在有主线后再看
+1. 理解⼀个简单  agent/runtime 的主逻辑
+2. 分清哪些问题该交给  LLM ，哪些问题该交给⼯程系统
+3. ⼿写⼀个最⼩可⽤的  agent runtime
+4. 看懂  LangGraph / Agents SDK / AutoGen 这类框架的核⼼抽象
+5. 具备做⼀个简单但稳定  AI 应⽤的系统能⼒
+1. 状态机与流程控制
+2. 接⼝设计与结构化约束
+3. 错误处理、恢复与持久化
+4. 可观测性与调试
+5. 上下⽂管理与信息压缩
+6. 安全边界与权限控制
+7. 并发、异步与任务调度
+8. 测试、评估与回归
+9. ⼯具设计（ Tool Design ）
+10. 数据与存储基础
+
+三、详细复习清单
+1. 状态机与流程控制（最⾼优先级）
+为什么重要
+AI 应⽤⼀旦进⼊多轮、⼯具调⽤、⻓任务，本质就变成了状态化  workflow。
+要复习的点
+你要能回答的问题
+最⼩练习
+11. RAG 系统设计
+12. 多  agent / graph orchestration
+13. 框架源码与抽象层
+有限状态机（ FSM ）
+事件驱动模型
+请求⽣命周期管理
+step loop / agent loop
+终⽌条件
+中断与取消（ cancel / abort ）
+timeout / retry / fallback
+deterministic workflow vs agentic workflow
+当前任务处于什么状态？
+下⼀步为什么会发⽣？
+什么时候应该结束，⽽不是继续 “ 思考 ” ？
+⽤⼾点击停⽌后，系统如何中断？
+画出⼀个  agent loop 状态图
+⼿写⼀个  while-loop agent runtime ，⽀持：
+⽤⼾输⼊
+⼀次  tool call
+回填结果
+step limit
+⽤⼾中断
+
+完成标准
+能⽤⾃⼰的话解释：
+agent 不是魔法，⽽是状态推进  + ⼯具执⾏  + 终⽌条件。
+2. 接⼝设计与结构化约束
+为什么重要
+LLM 不稳定，所以接⼝必须更严格，⽽不是更松。
+要复习的点
+你要能回答的问题
+最⼩练习
+完成标准
+能写出：
+API 设计基础
+JSON Schema / Pydantic / DTO
+输⼊输出契约
+参数校验
+fail-fast
+defensive programming
+structured output
+tool schema 设计
+模型输出为什么不能只靠 “ 相信它 ” ？
+tool call 的合法性由谁判断？
+参数设计为什么直接影响调⽤成功率？
+为  3 个⼯具设计  schema ：
+search(query)
+calc(expression)
+read_file(path)
+对  LLM 输出做⼀次  schema 校验与失败重试
+
+3. 错误处理、恢复与持久化
+为什么重要
+AI 系统不是 “ 出错就重来 ” 就能解决，尤其是⻓任务。
+要复习的点
+你要能回答的问题
+最⼩练习
+完成标准
+能设计出⼀个简单任务的恢复机制，⽽不是只能 “ 重新开始 ” 。
+⼀个清晰的  tool schema
+⼀个  parser + validator
+⼀个⾮法输出的处理逻辑
+retry 策略
+timeout
+幂等性
+checkpoint / snapshot
+崩溃恢复
+补偿动作（ compensating actions ）
+durable execution
+⼈⼯接管（ human-in-the-loop ）
+⼯具执⾏到⼀半失败，如何恢复？
+哪些步骤可以重试，哪些不该重试？
+⻓任务断掉后能否从中间恢复？
+给最⼩  runtime 加上：
+max_steps
+tool failure retry
+checkpoint 保存当前  step
+restart 后从  checkpoint 恢复
+
+4. 可观测性与调试
+为什么重要
+没有⽇志和  trace ， AI 系统就是⿊箱抽奖机。
+要复习的点
+你要能回答的问题
+最⼩练习
+完成标准
+出现错误时，你能在⽇志中定位：
+logging
+tracing
+metrics
+correlation id
+structured events
+事件流回放
+调试视⻆下的状态快照
+当前失败发⽣在哪⼀步？
+是模型输出错了，还是⼯具炸了，还是  parser 有问题？
+⽤⼾看到的结果和系统内部状态⼀致吗？
+给  runtime 加：
+step_id
+每轮输⼊输出⽇志
+tool call trace
+最终状态摘要
+第⼏步
+调了什么⼯具
+参数是什么
+返回了什么
+为什么终⽌
+
+5. 上下⽂管理与信息压缩
+为什么重要
+AI 系统很容易上下⽂膨胀，最后变慢、变贵、变笨。
+要复习的点
+你要能回答的问题
+最⼩练习
+完成标准
+能解释：
+不是所有中间结果都该喂回模型。
+6. 安全边界与权限控制
+为什么重要
+AI 系统⼀旦能调⼯具，就会接近真实世界⻛险。
+working set
+session state
+信息压缩
+上下⽂摘要
+短期记忆  vs ⻓期记忆
+缓存
+只保留必要状态
+哪些信息必须进⼊上下⽂？
+哪些只需要进⽇志，不需要回填模型？
+⻓任务如何避免上下⽂不断变肥？
+为⼀个  10 步任务设计上下⽂裁剪策略
+区分：
+当前任务必要信息
+历史摘要
+⽇志 / 审计信息
+
+要复习的点
+你要能回答的问题
+最⼩练习
+完成标准
+能把 “ 模型想做什么 ” 和 “ 系统允许做什么 ” 彻底分开。
+7. 并发、异步与任务调度
+为什么重要
+AI 应⽤会遇到并发⼯具、流式输出、后台执⾏、取消传播等问题。
+要复习的点
+least privilege
+sandbox
+输⼊校验
+输出过滤
+auth / authz
+secret handling
+⻛险分级
+审计⽇志
+哪些⼯具可以直接执⾏？
+哪些⼯具必须⼈⼯确认？
+模型如果输出危险命令，谁来拦？
+为  5 个⼯具做权限分级：
+只读
+低⻛险写操作
+⾼⻛险执⾏
+设计⼀个⼈⼯确认机制
+async/await
+任务调度
+并发与串⾏依赖
+
+最⼩练习
+8. 测试、评估与回归
+为什么重要
+AI 系统不能只靠 “ 看起来像能⽤ ” 。
+要复习的点
+最⼩练习
+9. ⼯具设计（ Tool Design ）
+为什么重要
+backpressure
+cancellation propagation
+队列与  worker
+让两个独⽴⼯具并发执⾏
+⽀持⽤⼾中断⼀个⻓任务
+unit test
+integration test
+end-to-end test
+golden set
+regression
+failure injection
+⾏为评估
+⼯具调⽤成功率评估
+为⼀个  agent 设计  20 条测试样例
+记录：
+是否调⽤正确⼯具
+是否返回合法结构
+是否在最⼤步数内完成
+
+⼯具设计直接决定  agent 的稳定性和效率。
+要复习的点
+最⼩练习
+10. 数据与存储基础
+为什么重要
+很多  AI 应⽤最后都会落到：会话、⽂档、⽇志、记忆、索引、任务状态。
+要复习的点
+最⼩练习
+⼯具粒度
+⼯具命名
+参数命名
+返回值结构化
+provider-specific schema 兼容
+tool result 压缩
+把  6 个过细⼯具重构为  2 到  3 个更合理⼯具
+对⽐调⽤轮数与稳定性
+session store
+task store
+document store
+cache
+vector store 的边界
+⼀致性与新鲜度
+数据⽣命周期
+为⼀个简单  AI 助⼿设计最⼩数据模型：
+messages
+tasks
+tool_logs
+summaries
+
+四、 AI 时代软件⼯程的学习顺序建议
+第  1 阶段：主逻辑
+第  2 阶段：可靠性
+第  3 阶段：规模化
+第  4 阶段：框架理解
+五、建议的源码阅读顺序
+第⼀批：轻抽象，先看⻣架
+状态机
+API/Schema
+Tool registry
+Agent loop
+Stop condition
+Retry / timeout
+Logging / tracing
+Checkpoint / resume
+Validation / guardrails
+Async / concurrency
+Evaluation / regression
+Context compaction
+Persistence
+OpenAI Agents SDK
+LangGraph
+AutoGen Core
+MCP
+1. OpenAI Agents SDK
+看  primitives
+看  tools / handoffs / guardrails / tracing
+
+第⼆批：多  agent 与事件驱动
+第三批：补充协议层
+六、最值得做的  5 个练习项⽬
+项⽬  1 ：最⼩  Tool-Calling Runtime
+要求：
+项⽬  2 ：带中断与恢复的⻓任务  Agent
+要求：
+项⽬  3 ：带上下⽂压缩的⽂件分析助⼿
+要求：
+2. LangGraph
+看  state graph
+看  persistence / checkpoint / tool node
+3. AutoGen Core
+看  event-driven / actor model
+看  agent chat 是怎么建⽴在  core 上的
+4. MCP 相关  SDK / server / client
+看⼯具互联和宿主协议
+单  agent
+3 个⼯具
+schema 校验
+step limit
+retry
+logging
+checkpoint
+resume
+cancel
+最终状态追踪
+
+项⽬  4 ：受权限约束的执⾏型  Agent
+要求：
+项⽬  5 ：最⼩评估系统
+要求：
+七、复习时要避免的误区
+误区  1 ：先沉迷框架
+框架是封装，不是本体。
+误区  2 ：把  RAG 当主线
+RAG 是能⼒模块，不是  runtime ⻣架。
+误区  3 ：迷信多  agent
+很多时候只是把简单问题复杂化。
+误区  4 ：只看  prompt
+真正难的是系统控制，不是多写⼏句提⽰词。
+误区  5 ：没有⽇志就调试
+这基本等于祈祷。
+多轮⽂件读取
+中间摘要
+working set 控制
+只读 / 写 / 危险操作分级
+⼈⼯确认
+审计⽇志
+测试集
+成功率统计
+错误类型分类
+回归对⽐
+
+⼋、最终⾃检问题
+复习完后，你应该能独⽴回答：
+九、最后的判断标准
+如果你重温完软件⼯程后，依然只会：
+那说明你复习错了⽅向。
+如果你能开始：
+那说明你真的进⼊了  AI 时代的软件⼯程主线。
+⼗、⼀句话版
+1. ⼀个  agent runtime 的最⼩⻣架是什么？
+2. 为什么  tool call 不能只靠  prompt 保证？
+3. 哪些逻辑应该  deterministic ，哪些才交给  LLM ？
+4. ⻓任务失败后怎么恢复？
+5. 为什么上下⽂不能⽆限累积？
+6. 如何让⽤⼾中断真正传递到系统执⾏链路？
+7. 如何定位⼀次⼯具调⽤失败的根因？
+8. 为什么优秀  AI 产品很多优势其实来⾃  runtime 和封装？
+接  API
+堆框架
+做  demo
+设计状态
+限制复杂度
+控制上下⽂
+约束⼯具
+恢复失败
+观察⾏为
+
+AI 时代最该复习的软件⼯程，不是 “ 怎么更快写业务 ” ，⽽是 “ 怎么把不稳定智能装进稳定系
+统 ” 。
