@@ -13,7 +13,8 @@ from app.artifact_tool import save_markdown_artifact
 from app.config import get_settings
 from app.llm_client import DeepSeekClient
 from app.logger import setup_logger
-from app.runtime import AgentRuntime
+from app.run_manager import RunRegistry, SessionStateGuard
+from app.runtime import AgentRuntime, RunCancelledError
 from app.schemas import ArtifactDetail, ArtifactSummary, AskRequest, AskResponse, SessionDetail, SessionSummary
 from app.session_store import MarkdownSessionStore, SessionStoreError
 from app.search_tool import TavilySearchTool
@@ -28,6 +29,7 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "templates")), name="s
 session_store = MarkdownSessionStore(BASE_DIR / "target" / "sessions")
 attachment_store = AttachmentStore(BASE_DIR / "target" / "uploads")
 artifact_store = MarkdownArtifactStore(BASE_DIR / "target" / "artifacts")
+run_registry = RunRegistry()
 
 runtime = AgentRuntime(
     llm_client=DeepSeekClient(settings),
@@ -56,6 +58,8 @@ async def ask(request: AskRequest) -> AskResponse:
             raise HTTPException(status_code=404, detail="会话不存在")
 
     try:
+        state_guard = SessionStateGuard(effective_session_id, session_store, attachment_store, artifact_store)
+        state_guard.begin()
         attachments = (
             attachment_store.list_attachment_contexts(effective_session_id)
             if effective_session_id
@@ -77,6 +81,7 @@ async def ask(request: AskRequest) -> AskResponse:
             search_results=response.search_results,
             tool_observations=response.tool_observations,
         )
+        state_guard.commit()
         response.session_id = session.session_id
         response.session_title = session.title
         response.conversation = session.messages
@@ -85,10 +90,13 @@ async def ask(request: AskRequest) -> AskResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
+        state_guard.rollback()
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except SessionStoreError as exc:
+        state_guard.rollback()
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except AttachmentStoreError as exc:
+        state_guard.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -106,8 +114,11 @@ async def ask_stream(
 
     uploads = [upload for upload in files if upload.filename]
     effective_session_id = session_id or uuid4().hex
+    run_id = run_registry.create()
+    state_guard = SessionStateGuard(effective_session_id, session_store, attachment_store, artifact_store)
 
     try:
+        state_guard.begin()
         if uploads:
             if effective_session_id is None:
                 effective_session_id = uuid4().hex
@@ -121,11 +132,14 @@ async def ask_stream(
             else []
         )
     except AttachmentStoreError as exc:
+        state_guard.rollback()
+        run_registry.remove(run_id)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     async def stream_events():
         runtime_response: AskResponse | None = None
         try:
+            yield _json_line({"type": "run_started", "run_id": run_id})
             if attachment_contexts:
                 yield _json_line(
                     {
@@ -139,6 +153,7 @@ async def ask_stream(
                 conversation=existing_session.messages if existing_session else [],
                 attachments=attachment_contexts,
                 session_id=effective_session_id,
+                is_cancelled=lambda: run_registry.is_cancelled(run_id),
             ):
                 if event["type"] == "final_response":
                     runtime_response = event["data"]
@@ -152,6 +167,7 @@ async def ask_stream(
                         search_results=runtime_response.search_results,
                         tool_observations=runtime_response.tool_observations,
                     )
+                    state_guard.commit()
                     runtime_response.session_id = session.session_id
                     runtime_response.session_title = session.title
                     runtime_response.conversation = session.messages
@@ -168,12 +184,30 @@ async def ask_stream(
                 if "log" in payload:
                     payload["log"] = payload["log"].model_dump(mode="json")
                 yield _json_line(payload)
+        except RunCancelledError as exc:
+            state_guard.rollback()
+            yield _json_line(
+                {
+                    "type": "cancelled",
+                    "run_id": run_id,
+                    "message": str(exc),
+                    "session_id": session_id,
+                }
+            )
         except (RuntimeError, ValueError, SessionStoreError, AttachmentStoreError) as exc:
-            if runtime_response is None and uploads and session_id is None and effective_session_id:
-                attachment_store.delete_session(effective_session_id)
+            state_guard.rollback()
             yield _json_line({"type": "error", "message": str(exc)})
+        finally:
+            run_registry.remove(run_id)
 
     return StreamingResponse(stream_events(), media_type="application/x-ndjson")
+
+
+@app.post("/api/runs/{run_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_run(run_id: str) -> Response:
+    if not run_registry.cancel(run_id):
+        raise HTTPException(status_code=404, detail="运行不存在或已结束")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/api/sessions", response_model=list[SessionSummary])

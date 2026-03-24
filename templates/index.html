@@ -318,6 +318,12 @@
             gap: 12px;
         }
 
+        .artifact-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
         .artifact-list {
             display: flex;
             flex-wrap: wrap;
@@ -336,6 +342,42 @@
         .artifact-item.active {
             border-color: var(--accent);
             background: rgba(47, 111, 237, 0.08);
+        }
+
+        .artifact-panel {
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            background: #fffdfa;
+            overflow: hidden;
+        }
+
+        .artifact-panel-toggle {
+            padding: 16px 18px;
+        }
+
+        .artifact-panel-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .artifact-panel-label {
+            font-weight: 700;
+            color: #111827;
+        }
+
+        .artifact-panel-status {
+            color: var(--muted);
+            font-size: 13px;
+            text-align: right;
+        }
+
+        .artifact-panel-body {
+            border-top: 1px solid var(--line);
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
         }
 
         .artifact-editor {
@@ -358,6 +400,10 @@
         .artifact-content {
             min-height: 220px;
             resize: vertical;
+        }
+
+        .artifact-save-state {
+            margin-right: auto;
         }
 
         .artifact-preview {
@@ -470,18 +516,44 @@
         }
 
         .source-block {
-            border: 1px solid var(--line);
-            border-radius: 18px;
-            background: linear-gradient(180deg, #fffdfa 0%, #fbf7f1 100%);
-            padding: 18px;
+            border-top: 1px solid var(--line);
+            padding-top: 18px;
         }
 
-        .source-block-header {
+        .source-toggle,
+        .artifact-panel-toggle {
+            cursor: pointer;
+            list-style: none;
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 12px;
-            margin-bottom: 14px;
+        }
+
+        .source-toggle::-webkit-details-marker,
+        .artifact-panel-toggle::-webkit-details-marker {
+            display: none;
+        }
+
+        .source-toggle-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .source-toggle-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #111827;
+        }
+
+        .source-toggle-hint {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .source-list-shell {
+            margin-top: 14px;
         }
 
         .source-list {
@@ -494,7 +566,25 @@
             border: 1px solid #e8dece;
             border-radius: 14px;
             background: white;
+            overflow: hidden;
+        }
+
+        .source-item-toggle {
+            cursor: pointer;
+            list-style: none;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
             padding: 14px 16px;
+        }
+
+        .source-item-toggle::-webkit-details-marker {
+            display: none;
+        }
+
+        .source-item-body {
+            padding: 0 16px 14px 52px;
+            border-top: 1px solid #f1e7d8;
         }
 
         .source-index {
@@ -735,33 +825,50 @@
                         <div id="answer" class="answer-markdown">
                             <p class="placeholder">等待提问...</p>
                         </div>
-                        <div id="sources" class="source-block" hidden>
-                            <div class="source-block-header">
-                                <h3>引用来源</h3>
-                                <p class="meta">根据本轮搜索结果生成</p>
+                        <details id="sources" class="source-block" hidden>
+                            <summary class="source-toggle">
+                                <div class="source-toggle-copy">
+                                    <span class="source-toggle-title">引用来源</span>
+                                    <span id="sources-count-text" class="meta">0 条来源</span>
+                                </div>
+                                <span class="source-toggle-hint">点开查看</span>
+                            </summary>
+                            <div class="source-list-shell">
+                                <div id="sources-list" class="source-list"></div>
                             </div>
-                            <div id="sources-list" class="source-list"></div>
-                        </div>
+                        </details>
                         <div class="artifact-shell">
                             <div class="artifact-head">
-                                <div>
-                                    <h3>Markdown 文档</h3>
-                                    <p class="meta">把当前答案转成可编辑文档。</p>
+                                <div class="artifact-meta">
+                                    <h3>Canvas 文档</h3>
+                                    <p id="artifact-summary-meta" class="meta">把当前答案转成可编辑 Markdown 文档。</p>
                                 </div>
                                 <button id="create-artifact" class="secondary small" type="button" disabled>生成 MD</button>
                             </div>
-                            <div id="artifact-list" class="artifact-list">
-                                <span class="placeholder">当前会话还没有文档。</span>
-                            </div>
-                            <div id="artifact-editor" class="artifact-editor hidden">
-                                <input id="artifact-title" class="artifact-input" type="text" placeholder="文档标题" />
-                                <textarea id="artifact-content" class="artifact-content" placeholder="Markdown 内容"></textarea>
-                                <div class="artifact-actions">
-                                    <button id="save-artifact" type="button">保存文档</button>
-                                    <a id="download-artifact" class="secondary small" href="#" download>下载 MD</a>
+                            <details id="artifact-panel" class="artifact-panel">
+                                <summary class="artifact-panel-toggle">
+                                    <div class="artifact-panel-copy">
+                                        <span id="artifact-panel-label" class="artifact-panel-label">尚未生成文档</span>
+                                        <span class="meta">点开后可编辑与下载 Markdown</span>
+                                    </div>
+                                    <span id="artifact-panel-status" class="artifact-panel-status">生成后在这里继续修改</span>
+                                </summary>
+                                <div class="artifact-panel-body">
+                                    <div id="artifact-list" class="artifact-list">
+                                        <span class="placeholder">当前会话还没有文档。</span>
+                                    </div>
+                                    <div id="artifact-editor" class="artifact-editor hidden">
+                                        <input id="artifact-title" class="artifact-input" type="text" placeholder="文档标题" />
+                                        <textarea id="artifact-content" class="artifact-content" placeholder="Markdown 内容"></textarea>
+                                        <div class="artifact-actions">
+                                            <span id="artifact-save-state" class="meta artifact-save-state">已保存</span>
+                                            <button id="save-artifact" class="secondary small hidden" type="button">保存更改</button>
+                                            <a id="download-artifact" class="secondary small" href="#" download>下载 MD</a>
+                                        </div>
+                                        <div id="artifact-preview" class="artifact-preview markdown-content"></div>
+                                    </div>
                                 </div>
-                                <div id="artifact-preview" class="artifact-preview markdown-content"></div>
-                            </div>
+                            </details>
                         </div>
                     </div>
                 </section>
@@ -811,13 +918,17 @@
                     <p id="status" class="meta composer-status"></p>
                     <p id="error" class="error"></p>
                 </div>
-                <button id="submit">发送问题</button>
+                <div class="composer-tools">
+                    <button id="cancel-run" class="secondary hidden" type="button">停止</button>
+                    <button id="submit">发送问题</button>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
         const submitButton = document.getElementById('submit');
+        const cancelRunButton = document.getElementById('cancel-run');
         const newSessionButton = document.getElementById('new-session');
         const deleteSessionButton = document.getElementById('delete-session');
         const attachTrigger = document.getElementById('attach-trigger');
@@ -826,6 +937,7 @@
         const answerElement = document.getElementById('answer');
         const sourcesElement = document.getElementById('sources');
         const sourcesListElement = document.getElementById('sources-list');
+        const sourcesCountTextElement = document.getElementById('sources-count-text');
         const logsElement = document.getElementById('logs');
         const resultsElement = document.getElementById('results');
         const logsCountElement = document.getElementById('logs-count');
@@ -841,12 +953,17 @@
         const pendingAttachmentsElement = document.getElementById('pending-attachments');
         const canvasUsedTag = document.getElementById('canvas-used-tag');
         const createArtifactButton = document.getElementById('create-artifact');
+        const artifactPanelElement = document.getElementById('artifact-panel');
         const artifactListElement = document.getElementById('artifact-list');
         const artifactEditorElement = document.getElementById('artifact-editor');
+        const artifactSummaryMetaElement = document.getElementById('artifact-summary-meta');
+        const artifactPanelLabelElement = document.getElementById('artifact-panel-label');
+        const artifactPanelStatusElement = document.getElementById('artifact-panel-status');
         const artifactTitleInput = document.getElementById('artifact-title');
         const artifactContentInput = document.getElementById('artifact-content');
         const artifactPreviewElement = document.getElementById('artifact-preview');
         const saveArtifactButton = document.getElementById('save-artifact');
+        const artifactSaveStateElement = document.getElementById('artifact-save-state');
         const downloadArtifactLink = document.getElementById('download-artifact');
 
         let currentSessionId = null;
@@ -854,6 +971,10 @@
         let pendingFiles = [];
         let latestAnswerMarkdown = '';
         let currentArtifactId = null;
+        let currentArtifacts = [];
+        let isArtifactDirty = false;
+        let activeRunId = null;
+        let activeRunBaseSessionId = null;
 
         function escapeHtml(value) {
             return value
@@ -866,12 +987,55 @@
         function setSessionMeta() {
             sessionMetaElement.textContent = `当前会话：${currentSessionTitle}`;
             deleteSessionButton.disabled = !currentSessionId;
-            createArtifactButton.disabled = !(currentSessionId && latestAnswerMarkdown.trim());
+            updateArtifactEntryButton();
+        }
+
+        function beginActiveRun(baseSessionId) {
+            activeRunId = null;
+            activeRunBaseSessionId = baseSessionId;
+            cancelRunButton.classList.remove('hidden');
+            cancelRunButton.disabled = false;
+        }
+
+        function finishActiveRun() {
+            activeRunId = null;
+            activeRunBaseSessionId = null;
+            cancelRunButton.classList.add('hidden');
+            cancelRunButton.disabled = false;
         }
 
         function setCanvasUsed(toolObservations) {
             const used = (toolObservations || []).some((item) => item.tool === 'canvas' && item.status === 'success');
             canvasUsedTag.classList.toggle('hidden', !used);
+        }
+
+        function updateArtifactEntryButton() {
+            const hasArtifacts = currentArtifacts.length > 0;
+            createArtifactButton.textContent = hasArtifacts ? '打开 Canvas' : '生成 MD';
+            createArtifactButton.disabled = hasArtifacts
+                ? !currentSessionId
+                : !(currentSessionId && latestAnswerMarkdown.trim());
+            artifactSummaryMetaElement.textContent = hasArtifacts
+                ? '已生成 Markdown 文档，点开可继续编辑或下载。'
+                : '把当前答案转成可编辑 Markdown 文档。';
+        }
+
+        function updateArtifactPanelState() {
+            const activeArtifact = currentArtifacts.find((item) => item.artifact_id === currentArtifactId) || currentArtifacts[0] || null;
+            artifactPanelLabelElement.textContent = activeArtifact ? activeArtifact.title : '尚未生成文档';
+            artifactPanelStatusElement.textContent = activeArtifact
+                ? (isArtifactDirty ? '有未保存修改' : '已保存，可继续下载')
+                : '生成后在这里继续修改';
+            updateArtifactEntryButton();
+        }
+
+        function setArtifactDirty(dirty) {
+            isArtifactDirty = Boolean(dirty && currentArtifactId);
+            saveArtifactButton.classList.toggle('hidden', !isArtifactDirty);
+            artifactSaveStateElement.textContent = currentArtifactId
+                ? (isArtifactDirty ? '有未保存修改' : '已保存')
+                : '尚未生成文档';
+            updateArtifactPanelState();
         }
 
         function resetArtifactEditor() {
@@ -882,6 +1046,8 @@
             artifactPreviewElement.innerHTML = '<p class="placeholder">请选择文档。</p>';
             downloadArtifactLink.href = '#';
             downloadArtifactLink.setAttribute('download', 'document.md');
+            setArtifactDirty(false);
+            updateArtifactPanelState();
         }
 
         function renderArtifactPreview() {
@@ -889,9 +1055,11 @@
         }
 
         function renderArtifactList(artifacts) {
+            currentArtifacts = artifacts;
             artifactListElement.innerHTML = '';
             if (!artifacts.length) {
                 artifactListElement.innerHTML = '<span class="placeholder">当前会话还没有文档。</span>';
+                updateArtifactPanelState();
                 return;
             }
 
@@ -903,6 +1071,7 @@
                 item.addEventListener('click', () => loadArtifact(artifact.artifact_id));
                 artifactListElement.appendChild(item);
             });
+            updateArtifactPanelState();
         }
 
         function renderSessionAttachments(attachments) {
@@ -978,7 +1147,9 @@
         function resetRoundOutput() {
             answerElement.innerHTML = '<p class="placeholder">等待提问...</p>';
             sourcesElement.hidden = true;
+            sourcesElement.open = false;
             sourcesListElement.innerHTML = '';
+            sourcesCountTextElement.textContent = '0 条来源';
             renderLogs([]);
             renderResults([]);
             statusElement.textContent = '';
@@ -992,6 +1163,7 @@
             questionInput.value = '';
             pendingFiles = [];
             latestAnswerMarkdown = '';
+            currentArtifacts = [];
             conversationElement.innerHTML = '<div class="placeholder">还没有对话记录，发送第一条消息后会自动创建会话。</div>';
             resetRoundOutput();
             setSessionMeta();
@@ -999,6 +1171,7 @@
             renderPendingFiles();
             renderArtifactList([]);
             resetArtifactEditor();
+            artifactPanelElement.open = false;
         }
 
         function renderLogs(logs) {
@@ -1052,21 +1225,26 @@
             sourcesListElement.innerHTML = '';
             if (!results.length) {
                 sourcesElement.hidden = true;
+                sourcesElement.open = false;
+                sourcesCountTextElement.textContent = '0 条来源';
                 return;
             }
 
             results.forEach((result, index) => {
-                const item = document.createElement('div');
+                const item = document.createElement('details');
                 item.className = 'source-item';
 
-                const titleRow = document.createElement('div');
-                titleRow.className = 'source-title-row';
+                const titleRow = document.createElement('summary');
+                titleRow.className = 'source-item-toggle';
                 titleRow.innerHTML = `
                     <span class="source-index">${index + 1}</span>
                     <span class="source-title">${escapeHtml(result.title || '未命名来源')}</span>
                 `;
                 item.appendChild(titleRow);
-                item.appendChild(buildExpandableText(result.snippet || '暂无摘要', 'source-snippet'));
+
+                const body = document.createElement('div');
+                body.className = 'source-item-body';
+                body.appendChild(buildExpandableText(result.snippet || '暂无摘要', 'source-snippet'));
 
                 const meta = document.createElement('div');
                 meta.className = 'meta';
@@ -1076,11 +1254,14 @@
                 link.rel = 'noreferrer';
                 link.textContent = result.url || '无链接';
                 meta.appendChild(link);
-                item.appendChild(meta);
+                body.appendChild(meta);
+                item.appendChild(body);
 
                 sourcesListElement.appendChild(item);
             });
+            sourcesCountTextElement.textContent = `${results.length} 条来源`;
             sourcesElement.hidden = false;
+            sourcesElement.open = false;
         }
 
         function renderConversation(messages) {
@@ -1124,6 +1305,7 @@
             if (!sessionId) {
                 renderArtifactList([]);
                 resetArtifactEditor();
+                artifactPanelElement.open = false;
                 return;
             }
 
@@ -1135,6 +1317,7 @@
             renderArtifactList(artifacts);
             if (!artifacts.length) {
                 resetArtifactEditor();
+                artifactPanelElement.open = false;
                 return;
             }
 
@@ -1161,6 +1344,8 @@
             downloadArtifactLink.href = `/api/sessions/${currentSessionId}/artifacts/${artifactId}/download`;
             downloadArtifactLink.setAttribute('download', data.filename);
             renderArtifactPreview();
+            artifactPanelElement.open = true;
+            setArtifactDirty(false);
             const listResponse = await fetch(`/api/sessions/${currentSessionId}/artifacts`);
             if (listResponse.ok) {
                 renderArtifactList(await listResponse.json());
@@ -1247,6 +1432,7 @@
 
         async function handleSubmit() {
             const question = questionInput.value.trim();
+            const baseSessionId = currentSessionId;
             errorElement.textContent = '';
             if (!question) {
                 errorElement.textContent = '请输入问题';
@@ -1254,6 +1440,7 @@
             }
 
             submitButton.disabled = true;
+            beginActiveRun(baseSessionId);
             statusElement.textContent = '执行中...';
             answerElement.innerHTML = '<p class="placeholder">处理中...</p>';
             sourcesElement.hidden = true;
@@ -1308,7 +1495,9 @@
                         }
 
                         const event = JSON.parse(line);
-                        if (event.type === 'status') {
+                        if (event.type === 'run_started') {
+                            activeRunId = event.run_id || null;
+                        } else if (event.type === 'status') {
                             statusElement.textContent = event.message || '';
                         } else if (event.type === 'log') {
                             liveLogs.push(event.log);
@@ -1346,6 +1535,15 @@
                             renderPendingFiles();
                             await loadArtifacts(data.session_id);
                             await loadSessions();
+                            finishActiveRun();
+                        } else if (event.type === 'cancelled') {
+                            if (activeRunBaseSessionId) {
+                                await loadSessionDetail(activeRunBaseSessionId);
+                            } else {
+                                startNewSession();
+                            }
+                            statusElement.textContent = event.message || '已停止当前执行';
+                            finishActiveRun();
                         } else if (event.type === 'error') {
                             throw new Error(event.message || '发生未知错误');
                         }
@@ -1354,12 +1552,30 @@
             } catch (error) {
                 answerElement.innerHTML = '<p class="placeholder">请求失败</p>';
                 errorElement.textContent = error.message || '发生未知错误';
+                finishActiveRun();
             } finally {
                 submitButton.disabled = false;
             }
         }
 
         submitButton.addEventListener('click', handleSubmit);
+        cancelRunButton.addEventListener('click', async () => {
+            if (!activeRunId) {
+                return;
+            }
+            cancelRunButton.disabled = true;
+            statusElement.textContent = '正在停止当前执行...';
+            try {
+                const response = await fetch(`/api/runs/${activeRunId}/cancel`, { method: 'POST' });
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || '停止执行失败');
+                }
+            } catch (error) {
+                errorElement.textContent = error.message || '停止执行失败';
+                cancelRunButton.disabled = false;
+            }
+        });
 
         newSessionButton.addEventListener('click', startNewSession);
         deleteSessionButton.addEventListener('click', async () => {
@@ -1386,8 +1602,20 @@
             }
         });
         artifactContentInput.addEventListener('input', renderArtifactPreview);
+        artifactTitleInput.addEventListener('input', () => setArtifactDirty(true));
+        artifactContentInput.addEventListener('input', () => setArtifactDirty(true));
         createArtifactButton.addEventListener('click', async () => {
-            if (!currentSessionId || !latestAnswerMarkdown.trim()) {
+            if (!currentSessionId) {
+                return;
+            }
+            if (currentArtifacts.length) {
+                artifactPanelElement.open = true;
+                if (!currentArtifactId && currentArtifacts[0]) {
+                    await loadArtifact(currentArtifacts[0].artifact_id);
+                }
+                return;
+            }
+            if (!latestAnswerMarkdown.trim()) {
                 return;
             }
             try {
@@ -1405,6 +1633,7 @@
                 }
                 currentArtifactId = data.artifact_id;
                 await loadArtifacts(currentSessionId, { openLatest: true });
+                artifactPanelElement.open = true;
             } catch (error) {
                 errorElement.textContent = error.message || '创建文档失败';
             }
@@ -1433,6 +1662,7 @@
                 downloadArtifactLink.href = `/api/sessions/${currentSessionId}/artifacts/${currentArtifactId}/download`;
                 downloadArtifactLink.setAttribute('download', data.filename);
                 renderArtifactPreview();
+                setArtifactDirty(false);
                 await loadArtifacts(currentSessionId);
             } catch (error) {
                 errorElement.textContent = error.message || '保存文档失败';

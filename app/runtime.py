@@ -1,7 +1,6 @@
 import logging
-
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Callable
 
 from app.artifact_store import ArtifactStoreError
 from app.artifact_tool import save_markdown_artifact
@@ -10,6 +9,10 @@ from app.schemas import AskResponse, AttachmentContext, ConversationMessage, Run
 from app.search_tool import SearchToolError, TavilySearchTool
 
 logger = logging.getLogger(__name__)
+
+
+class RunCancelledError(RuntimeError):
+    pass
 
 
 class AgentRuntime:
@@ -26,6 +29,7 @@ class AgentRuntime:
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
         session_id: str | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> AskResponse:
         final_response: AskResponse | None = None
         async for event in self.run_stream(
@@ -33,6 +37,7 @@ class AgentRuntime:
             conversation=conversation,
             attachments=attachments,
             session_id=session_id,
+            is_cancelled=is_cancelled,
         ):
             if event["type"] == "final_response":
                 final_response = event["data"]
@@ -46,6 +51,7 @@ class AgentRuntime:
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
         session_id: str | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> AsyncIterator[dict]:
         logs: list[RuntimeLog] = []
         tool_observations: list[ToolObservation] = []
@@ -57,13 +63,18 @@ class AgentRuntime:
         if not normalized_question:
             raise ValueError("问题不能为空")
 
-        input_log = RuntimeLog(stage="input", message=f"用户问题：{normalized_question}")
+        def ensure_not_cancelled() -> None:
+            if is_cancelled is not None and is_cancelled():
+                raise RunCancelledError("用户已中断当前执行")
+
+        input_log = RuntimeLog(stage="input", message=f"用户问题: {normalized_question}")
         logs.append(input_log)
         logger.info("收到用户问题: %s", normalized_question)
         yield {"type": "status", "message": "正在理解问题"}
         yield {"type": "log", "log": input_log}
 
         for step in range(1, self.MAX_STEPS + 1):
+            ensure_not_cancelled()
             try:
                 action = await self.llm_client.next_action(
                     normalized_question,
@@ -72,18 +83,20 @@ class AgentRuntime:
                     attachments,
                 )
             except LLMClientError as exc:
-                error_log = RuntimeLog(stage="error", message=f"第 {step} 轮决策失败：{exc}")
+                error_log = RuntimeLog(stage="error", message=f"第 {step} 轮决策失败: {exc}")
                 logs.append(error_log)
                 yield {"type": "log", "log": error_log}
                 raise RuntimeError(str(exc)) from exc
 
-            thought_log = RuntimeLog(stage="thought", message=f"第 {step} 轮 action：{action.action}")
+            ensure_not_cancelled()
+            thought_log = RuntimeLog(stage="thought", message=f"第 {step} 轮 action: {action.action}")
             logs.append(thought_log)
             logger.info("第 %s 轮 action=%s", step, action.action)
-            yield {"type": "status", "message": f"第 {step} 轮决策：{action.action}"}
+            yield {"type": "status", "message": f"第 {step} 轮决策: {action.action}"}
             yield {"type": "log", "log": thought_log}
 
             if action.action == "final":
+                ensure_not_cancelled()
                 answer = (action.answer or "").strip()
                 final_log = RuntimeLog(stage="final", message=f"第 {step} 轮输出最终答案")
                 logs.append(final_log)
@@ -110,6 +123,7 @@ class AgentRuntime:
             if action.action == "canvas":
                 if not session_id:
                     raise RuntimeError("Canvas 工具需要有效的会话 ID")
+                ensure_not_cancelled()
                 try:
                     artifact = save_markdown_artifact(
                         self.artifact_store,
@@ -118,7 +132,7 @@ class AgentRuntime:
                         content=(action.content or "").strip(),
                     )
                 except ArtifactStoreError as exc:
-                    error_log = RuntimeLog(stage="error", message=f"第 {step} 轮 Canvas 执行失败：{exc}")
+                    error_log = RuntimeLog(stage="error", message=f"第 {step} 轮 Canvas 执行失败: {exc}")
                     logs.append(error_log)
                     error_observation = ToolObservation(
                         step=step,
@@ -131,7 +145,9 @@ class AgentRuntime:
                     yield {"type": "log", "log": error_log}
                     yield {"type": "tool_result", "result": error_observation.model_dump(mode="json")}
                     raise RuntimeError(str(exc)) from exc
-                canvas_log = RuntimeLog(stage="canvas", message=f"第 {step} 轮已保存 Markdown 文档：{artifact.title}")
+
+                ensure_not_cancelled()
+                canvas_log = RuntimeLog(stage="canvas", message=f"第 {step} 轮已保存 Markdown 文档: {artifact.title}")
                 logs.append(canvas_log)
                 observation = ToolObservation(
                     step=step,
@@ -147,22 +163,23 @@ class AgentRuntime:
                 tool_observations.append(observation)
                 yield {"type": "log", "log": canvas_log}
                 yield {"type": "tool_result", "result": observation.model_dump(mode="json")}
-                yield {"type": "status", "message": f"已使用 Canvas 工具保存文档：{artifact.title}"}
+                yield {"type": "status", "message": f"已使用 Canvas 工具保存文档: {artifact.title}"}
                 yield {"type": "canvas", "artifact": artifact.model_dump(mode="json")}
                 continue
 
             query = (action.query or "").strip()
             latest_query = query
-            search_log = RuntimeLog(stage="search", message=f"第 {step} 轮搜索词：{query}")
+            ensure_not_cancelled()
+            search_log = RuntimeLog(stage="search", message=f"第 {step} 轮搜索词: {query}")
             logs.append(search_log)
             logger.info("第 %s 轮开始搜索 query=%s", step, query)
-            yield {"type": "status", "message": f"正在搜索：{query}"}
+            yield {"type": "status", "message": f"正在搜索: {query}"}
             yield {"type": "log", "log": search_log}
 
             try:
                 results = await self.search_tool.search(query)
             except SearchToolError as exc:
-                error_log = RuntimeLog(stage="error", message=f"第 {step} 轮搜索失败：{exc}")
+                error_log = RuntimeLog(stage="error", message=f"第 {step} 轮搜索失败: {exc}")
                 logs.append(error_log)
                 error_observation = ToolObservation(
                     step=step,
@@ -176,6 +193,7 @@ class AgentRuntime:
                 yield {"type": "tool_result", "result": error_observation.model_dump(mode="json")}
                 raise RuntimeError(str(exc)) from exc
 
+            ensure_not_cancelled()
             aggregated_results = results
             observation = ToolObservation(
                 step=step,
@@ -189,12 +207,12 @@ class AgentRuntime:
                 },
             )
             tool_observations.append(observation)
-            result_log = RuntimeLog(stage="search", message=f"第 {step} 轮搜索返回条数：{len(results)}")
+            result_log = RuntimeLog(stage="search", message=f"第 {step} 轮搜索返回条数: {len(results)}")
             logs.append(result_log)
             logger.info("第 %s 轮搜索完成 count=%s", step, len(results))
             yield {"type": "log", "log": result_log}
             yield {"type": "tool_result", "result": observation.model_dump(mode="json")}
-            yield {"type": "results", "results": [item.model_dump(mode='json') for item in results]}
+            yield {"type": "results", "results": [item.model_dump(mode="json") for item in results]}
 
             if not results:
                 empty_log = RuntimeLog(stage="thought", message=f"第 {step} 轮搜索无结果，继续交给 LLM 决策")

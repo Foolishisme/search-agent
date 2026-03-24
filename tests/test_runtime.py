@@ -4,7 +4,7 @@ from pathlib import Path
 
 from app.artifact_store import MarkdownArtifactStore
 from app.llm_client import LLMClientError
-from app.runtime import AgentRuntime
+from app.runtime import AgentRuntime, RunCancelledError
 from app.schemas import AgentAction, AttachmentContext, ConversationMessage, SearchResult
 from app.search_tool import SearchToolError
 
@@ -104,7 +104,11 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 AgentAction(action="final", answer="未找到充分信息，暂时无法确认。"),
             ]
         )
-        runtime = AgentRuntime(llm_client=llm_client, search_tool=FakeSearchTool(results=[[]]), artifact_store=self.artifact_store)
+        runtime = AgentRuntime(
+            llm_client=llm_client,
+            search_tool=FakeSearchTool(results=[[]]),
+            artifact_store=self.artifact_store,
+        )
 
         response = await runtime.run("请查一个很冷门的问题")
 
@@ -235,3 +239,29 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         artifacts = self.artifact_store.list_artifacts("session-1")
         self.assertEqual(len(artifacts), 1)
         self.assertEqual(artifacts[0].title, "操作手册")
+
+    async def test_run_stream_can_be_cancelled_between_steps(self):
+        results = [SearchResult(title="标题", snippet="摘要", url="https://example.com")]
+        cancelled = False
+
+        class CancellableSearchTool(FakeSearchTool):
+            async def search(self, query: str) -> list[SearchResult]:
+                nonlocal cancelled
+                payload = await super().search(query)
+                cancelled = True
+                return payload
+
+        runtime = AgentRuntime(
+            llm_client=FakeLLMClient(
+                actions=[
+                    AgentAction(action="search", query="cancel me"),
+                    AgentAction(action="final", answer="should not happen"),
+                ]
+            ),
+            search_tool=CancellableSearchTool(results=[results]),
+            artifact_store=self.artifact_store,
+        )
+
+        with self.assertRaises(RunCancelledError):
+            async for _ in runtime.run_stream("cancel test", is_cancelled=lambda: cancelled):
+                pass

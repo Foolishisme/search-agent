@@ -1,4 +1,7 @@
+import asyncio
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -9,6 +12,7 @@ import app.main as app_main
 from app.attachment_store import AttachmentStore
 from app.artifact_store import MarkdownArtifactStore
 from app.main import app
+from app.runtime import RunCancelledError
 from app.schemas import AskResponse, RuntimeLog, SearchResult, ToolObservation
 from app.session_store import MarkdownSessionStore
 
@@ -36,7 +40,10 @@ class ApiTests(unittest.TestCase):
         self.assertIn('id="logs-panel"', response.text)
         self.assertIn('id="results-panel"', response.text)
         self.assertIn('id="create-artifact"', response.text)
+        self.assertIn('id="artifact-panel"', response.text)
         self.assertIn('id="download-artifact"', response.text)
+        self.assertIn('id="sources-count-text"', response.text)
+        self.assertIn('id="cancel-run"', response.text)
         self.assertIn("Canvas Tool", response.text)
 
     def test_favicon(self):
@@ -203,6 +210,73 @@ class ApiTests(unittest.TestCase):
         detail = detail_response.json()
         self.assertEqual(len(detail["attachments"]), 1)
         self.assertEqual(detail["attachments"][0]["filename"], "memo.md")
+
+    def test_cancelled_stream_rolls_back_side_effects_and_keeps_previous_turn(self):
+        first_response = AskResponse(
+            session_id="",
+            session_title="",
+            answer="第一轮回答",
+            need_search=False,
+            logs=[RuntimeLog(stage="final", message="done")],
+            conversation=[],
+            attachments=[],
+        )
+
+        with patch("app.main.runtime.run", new=AsyncMock(return_value=first_response)):
+            ask_response = self.client.post("/api/ask", json={"question": "第一轮问题"})
+
+        session_id = ask_response.json()["session_id"]
+
+        async def cancellable_run_stream(*args, **kwargs):
+            app_main.artifact_store.create_artifact(kwargs["session_id"], "临时文档", "# 临时文档")
+            while not kwargs["is_cancelled"]():
+                yield {"type": "status", "message": "still running"}
+                await asyncio.sleep(0.01)
+            raise RunCancelledError("用户已中断当前执行")
+
+        payload: dict[str, object] = {}
+
+        def request_stream() -> None:
+            response = self.client.post(
+                "/api/ask/stream",
+                data={"question": "第十轮问题", "session_id": session_id},
+                files={"files": ("draft.md", b"# draft\nbody", "text/markdown")},
+            )
+            payload["status_code"] = response.status_code
+            payload["chunks"] = [line for line in response.text.splitlines() if line.strip()]
+
+        with patch("app.main.runtime.run_stream", new=cancellable_run_stream):
+            worker = threading.Thread(target=request_stream)
+            worker.start()
+
+            run_id = None
+            deadline = time.time() + 5
+            while time.time() < deadline and run_id is None:
+                with app_main.run_registry._lock:
+                    run_id = next(iter(app_main.run_registry._runs.keys()), None)
+                if run_id is None:
+                    time.sleep(0.01)
+
+            self.assertIsNotNone(run_id)
+            cancel_response = self.client.post(f"/api/runs/{run_id}/cancel")
+            self.assertEqual(cancel_response.status_code, 204)
+            worker.join(timeout=5)
+            self.assertFalse(worker.is_alive())
+
+        self.assertEqual(payload["status_code"], 200)
+        chunks = payload["chunks"]
+        self.assertTrue(any('"type": "cancelled"' in line for line in chunks))
+        detail_response = self.client.get(f"/api/sessions/{session_id}")
+        detail = detail_response.json()
+        self.assertEqual(len(detail["messages"]), 2)
+        self.assertEqual(detail["messages"][0]["content"], "第一轮问题")
+        self.assertEqual(detail["messages"][1]["content"], "第一轮回答")
+        self.assertEqual(detail["attachments"], [])
+        self.assertEqual(self.client.get(f"/api/sessions/{session_id}/artifacts").json(), [])
+
+    def test_cancel_run_returns_404_for_unknown_run(self):
+        response = self.client.post("/api/runs/missing-run/cancel")
+        self.assertEqual(response.status_code, 404)
 
     def test_tool_observations_persist_on_session_detail(self):
         fake_response = AskResponse(
