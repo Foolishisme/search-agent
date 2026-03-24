@@ -1,10 +1,13 @@
+import json
 from pathlib import Path
+from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, Response
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from app.attachment_store import AttachmentStore, AttachmentStoreError
 from app.config import get_settings
 from app.llm_client import DeepSeekClient
 from app.logger import setup_logger
@@ -21,6 +24,7 @@ app = FastAPI(title="Minimal Search Agent")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "templates")), name="static")
 session_store = MarkdownSessionStore(BASE_DIR / "target" / "sessions")
+attachment_store = AttachmentStore(BASE_DIR / "target" / "uploads")
 
 runtime = AgentRuntime(
     llm_client=DeepSeekClient(settings),
@@ -47,9 +51,15 @@ async def ask(request: AskRequest) -> AskResponse:
             raise HTTPException(status_code=404, detail="会话不存在")
 
     try:
+        attachments = (
+            attachment_store.list_attachment_contexts(request.session_id)
+            if request.session_id
+            else []
+        )
         response = await runtime.run(
             request.question,
             conversation=existing_session.messages if existing_session else [],
+            attachments=attachments,
         )
         session = session_store.append_turn(
             request.session_id,
@@ -63,6 +73,7 @@ async def ask(request: AskRequest) -> AskResponse:
         response.session_id = session.session_id
         response.session_title = session.title
         response.conversation = session.messages
+        response.attachments = attachment_store.list_attachments(session.session_id)
         return response
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -70,6 +81,90 @@ async def ask(request: AskRequest) -> AskResponse:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except SessionStoreError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except AttachmentStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/ask/stream")
+async def ask_stream(
+    question: str = Form(...),
+    session_id: str | None = Form(None),
+    files: list[UploadFile] = File(default=[]),
+) -> StreamingResponse:
+    existing_session = None
+    if session_id:
+        existing_session = session_store.get_session(session_id)
+        if existing_session is None:
+            raise HTTPException(status_code=404, detail="会话不存在")
+
+    uploads = [upload for upload in files if upload.filename]
+    effective_session_id = session_id or (uuid4().hex if uploads else None)
+
+    try:
+        if uploads:
+            if effective_session_id is None:
+                effective_session_id = uuid4().hex
+            upload_payloads: list[tuple[str, str | None, bytes]] = []
+            for upload in uploads:
+                upload_payloads.append((upload.filename or "attachment", upload.content_type, await upload.read()))
+            attachment_store.save_files(effective_session_id, upload_payloads)
+        attachment_contexts = (
+            attachment_store.list_attachment_contexts(effective_session_id)
+            if effective_session_id
+            else []
+        )
+    except AttachmentStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    async def stream_events():
+        runtime_response: AskResponse | None = None
+        try:
+            if attachment_contexts:
+                yield _json_line(
+                    {
+                        "type": "attachments",
+                        "attachments": [item.model_dump(mode="json") for item in attachment_store.list_attachments(effective_session_id)],
+                    }
+                )
+
+            async for event in runtime.run_stream(
+                question,
+                conversation=existing_session.messages if existing_session else [],
+                attachments=attachment_contexts,
+            ):
+                if event["type"] == "final_response":
+                    runtime_response = event["data"]
+                    session = session_store.append_turn(
+                        effective_session_id,
+                        question,
+                        runtime_response.answer,
+                        need_search=runtime_response.need_search,
+                        query=runtime_response.query,
+                        logs=runtime_response.logs,
+                        search_results=runtime_response.search_results,
+                    )
+                    runtime_response.session_id = session.session_id
+                    runtime_response.session_title = session.title
+                    runtime_response.conversation = session.messages
+                    runtime_response.attachments = attachment_store.list_attachments(session.session_id)
+                    yield _json_line(
+                        {
+                            "type": "final",
+                            "data": runtime_response.model_dump(mode="json"),
+                        }
+                    )
+                    return
+
+                payload = event.copy()
+                if "log" in payload:
+                    payload["log"] = payload["log"].model_dump(mode="json")
+                yield _json_line(payload)
+        except (RuntimeError, ValueError, SessionStoreError, AttachmentStoreError) as exc:
+            if runtime_response is None and uploads and session_id is None and effective_session_id:
+                attachment_store.delete_session(effective_session_id)
+            yield _json_line({"type": "error", "message": str(exc)})
+
+    return StreamingResponse(stream_events(), media_type="application/x-ndjson")
 
 
 @app.get("/api/sessions", response_model=list[SessionSummary])
@@ -82,6 +177,7 @@ async def get_session(session_id: str) -> SessionDetail:
     session = session_store.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="会话不存在")
+    session.attachments = attachment_store.list_attachments(session_id)
     return session
 
 
@@ -89,4 +185,9 @@ async def get_session(session_id: str) -> SessionDetail:
 async def delete_session(session_id: str) -> Response:
     if not session_store.delete_session(session_id):
         raise HTTPException(status_code=404, detail="会话不存在")
+    attachment_store.delete_session(session_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _json_line(payload: dict) -> str:
+    return json.dumps(payload, ensure_ascii=False) + "\n"

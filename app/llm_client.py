@@ -4,7 +4,7 @@ import logging
 import httpx
 
 from app.config import Settings
-from app.schemas import AgentAction, ConversationMessage
+from app.schemas import AgentAction, AttachmentContext, ConversationMessage
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +23,9 @@ class DeepSeekClient:
         question: str,
         history: list[dict],
         conversation: list[ConversationMessage] | None = None,
+        attachments: list[AttachmentContext] | None = None,
     ) -> AgentAction:
-        prompt = self._build_action_prompt(question, history, conversation or [])
+        prompt = self._build_action_prompt(question, history, conversation or [], attachments or [])
         data = await self._generate_json(prompt)
         try:
             action = AgentAction.model_validate(data)
@@ -43,6 +44,7 @@ class DeepSeekClient:
         question: str,
         history: list[dict],
         conversation: list[ConversationMessage],
+        attachments: list[AttachmentContext],
     ) -> str:
         serialized_history = json.dumps(history, ensure_ascii=False)
         recent_conversation = [
@@ -53,6 +55,17 @@ class DeepSeekClient:
             }
             for item in conversation[-6:]
         ]
+        serialized_attachments = json.dumps(
+            [
+                {
+                    "filename": item.filename,
+                    "media_type": item.media_type,
+                    "excerpt": item.excerpt,
+                }
+                for item in attachments
+            ],
+            ensure_ascii=False,
+        )
         serialized_conversation = json.dumps(recent_conversation, ensure_ascii=False)
         return (
             "你是一个最小搜索 Agent。你每一轮只能输出一个 JSON 对象，不能输出 Markdown，不能输出额外解释。"
@@ -62,9 +75,11 @@ class DeepSeekClient:
             "如果当前信息不足以可靠回答，你应该优先选择 search。"
             "如果 history 中已经有搜索结果，你应基于 history 里的结果整理答案，而不是继续盲目搜索。"
             "如果 conversation 中有历史对话，你应把它当作当前会话记忆；当用户问题依赖上下文时，需要结合这些历史信息理解意图。"
+            "如果 attachments 中有附件摘录，你应结合附件内容回答；当附件已经足够回答时，不必强制搜索。"
             "当搜索结果不足时，可以直接输出带不确定性的 final。"
             f"\n用户问题：{question}"
             f"\n当前 conversation：{serialized_conversation}"
+            f"\n当前 attachments：{serialized_attachments}"
             f"\n当前 history：{serialized_history}"
         )
 

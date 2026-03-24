@@ -105,6 +105,34 @@
             overflow: hidden;
         }
 
+        .attachment-bar {
+            margin-top: 14px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .attachment-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: #fffdfa;
+            font-size: 13px;
+            color: var(--text);
+        }
+
+        .chip-remove {
+            border: 0;
+            background: transparent;
+            color: var(--muted);
+            padding: 0;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
         h1,
         h2,
         h3,
@@ -530,6 +558,20 @@
             min-height: 20px;
         }
 
+        .composer-topline {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .composer-tools {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
         .hidden {
             display: none !important;
         }
@@ -596,6 +638,12 @@
                         </div>
                         <button id="delete-session" class="danger" disabled>删除记忆</button>
                     </div>
+                    <div>
+                        <p class="meta">会话附件</p>
+                        <div id="session-attachments" class="attachment-bar">
+                            <span class="placeholder">当前会话还没有附件。</span>
+                        </div>
+                    </div>
                 </section>
 
                 <section class="panel card conversation-card">
@@ -650,6 +698,16 @@
 
     <div class="floating-composer">
         <div class="composer-shell">
+            <div class="composer-topline">
+                <div class="composer-tools">
+                    <button id="attach-trigger" class="secondary" type="button">+</button>
+                    <p class="meta">支持 PDF / TXT / MD</p>
+                </div>
+            </div>
+            <input id="file-input" type="file" accept=".pdf,.txt,.md" multiple class="hidden" />
+            <div id="pending-attachments" class="attachment-bar">
+                <span class="placeholder">未选择附件。</span>
+            </div>
             <textarea id="question" placeholder="Ask anything"></textarea>
             <div class="composer-actions">
                 <div>
@@ -665,6 +723,8 @@
         const submitButton = document.getElementById('submit');
         const newSessionButton = document.getElementById('new-session');
         const deleteSessionButton = document.getElementById('delete-session');
+        const attachTrigger = document.getElementById('attach-trigger');
+        const fileInput = document.getElementById('file-input');
         const questionInput = document.getElementById('question');
         const answerElement = document.getElementById('answer');
         const sourcesElement = document.getElementById('sources');
@@ -680,9 +740,12 @@
         const conversationElement = document.getElementById('conversation');
         const sessionListElement = document.getElementById('session-list');
         const sessionMetaElement = document.getElementById('session-meta');
+        const sessionAttachmentsElement = document.getElementById('session-attachments');
+        const pendingAttachmentsElement = document.getElementById('pending-attachments');
 
         let currentSessionId = null;
         let currentSessionTitle = '新会话';
+        let pendingFiles = [];
 
         function escapeHtml(value) {
             return value
@@ -695,6 +758,44 @@
         function setSessionMeta() {
             sessionMetaElement.textContent = `当前会话：${currentSessionTitle}`;
             deleteSessionButton.disabled = !currentSessionId;
+        }
+
+        function renderSessionAttachments(attachments) {
+            sessionAttachmentsElement.innerHTML = '';
+            if (!attachments.length) {
+                sessionAttachmentsElement.innerHTML = '<span class="placeholder">当前会话还没有附件。</span>';
+                return;
+            }
+
+            attachments.forEach((attachment) => {
+                const chip = document.createElement('span');
+                chip.className = 'attachment-chip';
+                chip.textContent = `${attachment.filename}`;
+                sessionAttachmentsElement.appendChild(chip);
+            });
+        }
+
+        function renderPendingFiles() {
+            pendingAttachmentsElement.innerHTML = '';
+            if (!pendingFiles.length) {
+                pendingAttachmentsElement.innerHTML = '<span class="placeholder">未选择附件。</span>';
+                return;
+            }
+
+            pendingFiles.forEach((file, index) => {
+                const chip = document.createElement('span');
+                chip.className = 'attachment-chip';
+                chip.innerHTML = `
+                    <span>${escapeHtml(file.name)}</span>
+                    <button type="button" class="chip-remove" data-index="${index}">×</button>
+                `;
+                const removeButton = chip.querySelector('[data-index]');
+                removeButton.addEventListener('click', () => {
+                    pendingFiles = pendingFiles.filter((_, itemIndex) => itemIndex !== index);
+                    renderPendingFiles();
+                });
+                pendingAttachmentsElement.appendChild(chip);
+            });
         }
 
         function buildExpandableText(text, className = '') {
@@ -743,9 +844,12 @@
             currentSessionId = null;
             currentSessionTitle = '新会话';
             questionInput.value = '';
+            pendingFiles = [];
             conversationElement.innerHTML = '<div class="placeholder">还没有对话记录，发送第一条消息后会自动创建会话。</div>';
             resetRoundOutput();
             setSessionMeta();
+            renderSessionAttachments([]);
+            renderPendingFiles();
         }
 
         function renderLogs(logs) {
@@ -914,6 +1018,7 @@
                 renderLogs(data.latest_logs || []);
                 renderResults(data.latest_search_results || []);
                 renderSources(data.latest_search_results || []);
+                renderSessionAttachments(data.attachments || []);
                 statusElement.textContent = `已加载会话：${data.title}`;
                 await loadSessions();
             } catch (error) {
@@ -939,7 +1044,7 @@
             }
         }
 
-        submitButton.addEventListener('click', async () => {
+        async function handleSubmit() {
             const question = questionInput.value.trim();
             errorElement.textContent = '';
             if (!question) {
@@ -956,39 +1061,97 @@
             renderResults([]);
 
             try {
-                const response = await fetch('/api/ask', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        question,
-                        session_id: currentSessionId,
-                    }),
+                const formData = new FormData();
+                formData.append('question', question);
+                if (currentSessionId) {
+                    formData.append('session_id', currentSessionId);
+                }
+                pendingFiles.forEach((file) => {
+                    formData.append('files', file, file.name);
                 });
-                const data = await response.json();
+
+                const response = await fetch('/api/ask/stream', {
+                    method: 'POST',
+                    body: formData,
+                });
                 if (!response.ok) {
-                    throw new Error(data.detail || '请求失败');
+                    const text = await response.text();
+                    let detail = '请求失败';
+                    try {
+                        detail = JSON.parse(text).detail || detail;
+                    } catch {
+                        detail = text || detail;
+                    }
+                    throw new Error(detail);
                 }
 
-                currentSessionId = data.session_id;
-                currentSessionTitle = data.session_title;
-                setSessionMeta();
-                answerElement.innerHTML = renderMarkdown(data.answer);
-                renderConversation(data.conversation || []);
-                renderLogs(data.logs || []);
-                renderResults(data.search_results || []);
-                renderSources(data.search_results || []);
-                statusElement.textContent = data.need_search
-                    ? `已完成，触发搜索：${data.query || ''}`
-                    : '已完成，未触发搜索';
-                questionInput.value = '';
-                await loadSessions();
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let liveLogs = [];
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        break;
+                    }
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (!line.trim()) {
+                            continue;
+                        }
+
+                        const event = JSON.parse(line);
+                        if (event.type === 'status') {
+                            statusElement.textContent = event.message || '';
+                        } else if (event.type === 'log') {
+                            liveLogs.push(event.log);
+                            renderLogs(liveLogs);
+                            logsPanel.open = true;
+                        } else if (event.type === 'results') {
+                            renderResults(event.results || []);
+                            renderSources(event.results || []);
+                            if ((event.results || []).length) {
+                                resultsPanel.open = true;
+                            }
+                        } else if (event.type === 'attachments') {
+                            renderSessionAttachments(event.attachments || []);
+                        } else if (event.type === 'final') {
+                            const data = event.data;
+                            currentSessionId = data.session_id;
+                            currentSessionTitle = data.session_title;
+                            setSessionMeta();
+                            answerElement.innerHTML = renderMarkdown(data.answer);
+                            renderConversation(data.conversation || []);
+                            renderLogs(data.logs || []);
+                            renderResults(data.search_results || []);
+                            renderSources(data.search_results || []);
+                            renderSessionAttachments(data.attachments || []);
+                            statusElement.textContent = data.need_search
+                                ? `已完成，触发搜索：${data.query || ''}`
+                                : '已完成，未触发搜索';
+                            questionInput.value = '';
+                            pendingFiles = [];
+                            renderPendingFiles();
+                            await loadSessions();
+                        } else if (event.type === 'error') {
+                            throw new Error(event.message || '发生未知错误');
+                        }
+                    }
+                }
             } catch (error) {
                 answerElement.innerHTML = '<p class="placeholder">请求失败</p>';
                 errorElement.textContent = error.message || '发生未知错误';
             } finally {
                 submitButton.disabled = false;
             }
-        });
+        }
+
+        submitButton.addEventListener('click', handleSubmit);
 
         newSessionButton.addEventListener('click', startNewSession);
         deleteSessionButton.addEventListener('click', async () => {
@@ -998,9 +1161,27 @@
             await deleteSession(currentSessionId);
         });
 
+        attachTrigger.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', () => {
+            const allowed = ['.pdf', '.txt', '.md'];
+            const chosen = Array.from(fileInput.files || []).filter((file) =>
+                allowed.some((suffix) => file.name.toLowerCase().endsWith(suffix))
+            );
+            pendingFiles = [...pendingFiles, ...chosen];
+            renderPendingFiles();
+            fileInput.value = '';
+        });
+        questionInput.addEventListener('keydown', (event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                event.preventDefault();
+                handleSubmit();
+            }
+        });
+
         startNewSession();
         renderLogs([]);
         renderResults([]);
+        renderPendingFiles();
         loadSessions();
     </script>
 </body>

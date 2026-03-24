@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 import app.main as app_main
+from app.attachment_store import AttachmentStore
 from app.main import app
 from app.schemas import AskResponse, RuntimeLog, SearchResult
 from app.session_store import MarkdownSessionStore
@@ -15,6 +16,7 @@ class ApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         app_main.session_store = MarkdownSessionStore(Path(self.tempdir.name))
+        app_main.attachment_store = AttachmentStore(Path(self.tempdir.name) / "uploads")
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -158,3 +160,39 @@ class ApiTests(unittest.TestCase):
         continuation_call = runtime_mock.await_args_list[1]
         self.assertEqual(len(continuation_call.kwargs["conversation"]), 2)
         self.assertEqual(continuation_call.kwargs["conversation"][0].content, "第一轮问题")
+
+    def test_api_ask_stream_with_attachment(self):
+        async def fake_run_stream(*args, **kwargs):
+            yield {"type": "status", "message": "正在理解问题"}
+            yield {"type": "log", "log": RuntimeLog(stage="input", message="用户问题：读取附件")}
+            yield {
+                "type": "final_response",
+                "data": AskResponse(
+                    session_id="",
+                    session_title="",
+                    answer="附件已读取",
+                    need_search=False,
+                    logs=[RuntimeLog(stage="final", message="done")],
+                    conversation=[],
+                    attachments=[],
+                ),
+            }
+
+        with patch("app.main.runtime.run_stream", new=fake_run_stream):
+            response = self.client.post(
+                "/api/ask/stream",
+                data={"question": "读取附件"},
+                files={"files": ("memo.md", b"# memo\nhello", "text/markdown")},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        chunks = [line for line in response.text.splitlines() if line.strip()]
+        self.assertTrue(any('"type": "attachments"' in line for line in chunks))
+        self.assertTrue(any('"type": "final"' in line for line in chunks))
+
+        session_response = self.client.get("/api/sessions")
+        session_id = session_response.json()[0]["session_id"]
+        detail_response = self.client.get(f"/api/sessions/{session_id}")
+        detail = detail_response.json()
+        self.assertEqual(len(detail["attachments"]), 1)
+        self.assertEqual(detail["attachments"][0]["filename"], "memo.md")

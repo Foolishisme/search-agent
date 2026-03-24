@@ -31,6 +31,19 @@ class ConversationMessage(BaseModel):
     created_at: str
 
 
+class AttachmentMeta(BaseModel):
+    attachment_id: str
+    filename: str
+    media_type: str
+    size_bytes: int
+    uploaded_at: str
+
+
+class AttachmentContext(AttachmentMeta):
+    excerpt: str
+    content: str
+
+
 class SessionTurn(BaseModel):
     created_at: str
     question: str
@@ -55,6 +68,7 @@ class SessionDetail(SessionSummary):
     turns: list[SessionTurn] = Field(default_factory=list)
     latest_logs: list[RuntimeLog] = Field(default_factory=list)
     latest_search_results: list[SearchResult] = Field(default_factory=list)
+    attachments: list[AttachmentMeta] = Field(default_factory=list)
 
 
 class AskResponse(BaseModel):
@@ -66,3 +80,4 @@ class AskResponse(BaseModel):
     search_results: list[SearchResult] = Field(default_factory=list)
     logs: list[RuntimeLog] = Field(default_factory=list)
     conversation: list[ConversationMessage] = Field(default_factory=list)
+    attachments: list[AttachmentMeta] = Field(default_factory=list)

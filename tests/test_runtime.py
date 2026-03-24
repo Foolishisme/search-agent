@@ -2,7 +2,7 @@ import unittest
 
 from app.llm_client import LLMClientError
 from app.runtime import AgentRuntime
-from app.schemas import AgentAction, ConversationMessage, SearchResult
+from app.schemas import AgentAction, AttachmentContext, ConversationMessage, SearchResult
 from app.search_tool import SearchToolError
 
 
@@ -18,6 +18,7 @@ class FakeLLMClient:
         question: str,
         history: list[dict],
         conversation: list[ConversationMessage] | None = None,
+        attachments: list[AttachmentContext] | None = None,
     ) -> AgentAction:
         self.histories.append([item.copy() for item in history])
         self.conversations.append(list(conversation or []))
@@ -167,3 +168,26 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.answer, "结合上下文的答案")
         self.assertEqual(len(llm_client.conversations[0]), 2)
         self.assertEqual(llm_client.conversations[0][0].content, "我们刚才在聊 LangGraph")
+
+    async def test_run_stream_yields_logs_results_and_final(self):
+        llm_client = FakeLLMClient(
+            actions=[
+                AgentAction(action="search", query="流式测试"),
+                AgentAction(action="final", answer="流式最终答案"),
+            ]
+        )
+        runtime = AgentRuntime(
+            llm_client=llm_client,
+            search_tool=FakeSearchTool(
+                results=[[SearchResult(title="标题", snippet="摘要", url="https://example.com")]]
+            ),
+        )
+
+        events = []
+        async for event in runtime.run_stream("测试流式"):
+            events.append(event)
+
+        self.assertEqual(events[0]["type"], "status")
+        self.assertTrue(any(item["type"] == "results" for item in events))
+        self.assertEqual(events[-1]["type"], "final_response")
+        self.assertEqual(events[-1]["data"].answer, "流式最终答案")
