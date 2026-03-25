@@ -291,7 +291,7 @@ class ApiTests(unittest.TestCase):
             tool_observations=[
                 ToolObservation(
                     step=1,
-                    tool="search",
+                    tool="search_web",
                     status="success",
                     message="搜索工具执行成功",
                     data={"query": "桥 绝句", "results_count": 1},
@@ -307,7 +307,7 @@ class ApiTests(unittest.TestCase):
         session_id = ask_response.json()["session_id"]
         detail_response = self.client.get(f"/api/sessions/{session_id}")
         detail = detail_response.json()
-        self.assertEqual(detail["latest_tool_observations"][0]["tool"], "search")
+        self.assertEqual(detail["latest_tool_observations"][0]["tool"], "search_web")
         self.assertEqual(detail["latest_tool_observations"][0]["status"], "success")
 
     def test_artifact_endpoints(self):

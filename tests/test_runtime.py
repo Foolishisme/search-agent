@@ -154,7 +154,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(response.search_results), 1)
         self.assertEqual(response.answer, "answer from search")
         self.assertEqual(llm_client.histories[0], [])
-        self.assertEqual(llm_client.histories[1][0]["tool"], "search")
+        self.assertEqual(llm_client.histories[1][0]["tool"], "search_web")
 
     async def test_search_retry_then_answer(self):
         llm_client = FakeLLMClient(

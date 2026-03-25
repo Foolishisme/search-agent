@@ -2,11 +2,10 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any, Callable
 
-from app.artifact_store import ArtifactStoreError
-from app.artifact_tool import save_markdown_artifact
 from app.llm_client import LLMClientError
-from app.schemas import AskResponse, AttachmentContext, CanvasDraft, ConversationMessage, RuntimeLog, SearchDecision, SearchResult, ToolObservation
-from app.search_tool import SearchToolError, TavilySearchTool
+from app.schemas import AskResponse, AttachmentContext, ConversationMessage, RuntimeLog, SearchDecision, SearchResult, ToolCall, ToolObservation
+from app.search_tool import TavilySearchTool
+from app.tool_registry import ToolExecutionError, ToolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +21,7 @@ class AgentRuntime:
         self.llm_client = llm_client
         self.search_tool = search_tool
         self.artifact_store = artifact_store
+        self.tool_executor = ToolExecutor(search_tool=search_tool, artifact_store=artifact_store)
 
     async def run(
         self,
@@ -227,29 +227,16 @@ class AgentRuntime:
     ) -> tuple[list[SearchResult], ToolObservation, RuntimeLog]:
         logger.info("Search attempt %s query=%s", step, query)
         try:
-            results = await self.search_tool.search(query)
-        except SearchToolError as exc:
-            observation = ToolObservation(
+            outcome = await self.tool_executor.call(
+                ToolCall(name="search_web", arguments={"query": query}),
                 step=step,
-                tool="search",
-                status="error",
-                message=str(exc),
-                data={"query": query},
             )
+        except ToolExecutionError as exc:
             raise RuntimeError(str(exc)) from exc
 
-        observation = ToolObservation(
-            step=step,
-            tool="search",
-            status="success",
-            message="Search tool executed successfully",
-            data={
-                "query": query,
-                "results_count": len(results),
-                "results": [item.model_dump(mode="json") for item in results],
-            },
-        )
-        result_log = RuntimeLog(stage="search", message=f"Search returned {len(results)} result(s)")
+        results = outcome.payload["results"]
+        observation = outcome.observation
+        result_log = RuntimeLog(stage="search", message=f"Tool search_web returned {len(results)} result(s)")
         return results, observation, result_log
 
     async def _assess_search_progress(
@@ -304,31 +291,26 @@ class AgentRuntime:
             raise RuntimeError("Canvas post-process requires a valid session id")
 
         try:
-            draft: CanvasDraft = await self.llm_client.build_canvas_document(
+            draft = await self.llm_client.build_canvas_document(
                 question,
                 answer,
                 conversation=conversation,
                 attachments=attachments,
             )
-            artifact = save_markdown_artifact(
-                self.artifact_store,
-                session_id=session_id,
-                title=draft.title.strip(),
-                content=draft.content.strip(),
+            outcome = await self.tool_executor.call(
+                ToolCall(
+                    name="save_markdown_artifact",
+                    arguments={
+                        "session_id": session_id,
+                        "title": draft.title.strip(),
+                        "content": draft.content.strip(),
+                    },
+                ),
+                step=1000 + len(question),
             )
-        except (LLMClientError, ArtifactStoreError):
+        except (LLMClientError, ToolExecutionError):
             return None
 
-        canvas_log = RuntimeLog(stage="canvas", message=f"Saved Markdown document: {artifact.title}")
-        observation = ToolObservation(
-            step=1000 + len(question),
-            tool="canvas",
-            status="success",
-            message="Canvas tool saved a Markdown document",
-            data={
-                "title": artifact.title,
-                "artifact_id": artifact.artifact_id,
-                "filename": artifact.filename,
-            },
-        )
-        return canvas_log, observation, artifact
+        artifact = outcome.payload["artifact"]
+        canvas_log = RuntimeLog(stage="canvas", message=f"Tool save_markdown_artifact saved document: {artifact.title}")
+        return canvas_log, outcome.observation, artifact

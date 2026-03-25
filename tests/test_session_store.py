@@ -26,7 +26,7 @@ class SessionStoreTests(unittest.TestCase):
             tool_observations=[
                 ToolObservation(
                     step=1,
-                    tool="search",
+                    tool="search_web",
                     status="success",
                     message="搜索工具执行成功",
                     data={"query": "示例查询", "results_count": 1},
@@ -51,7 +51,7 @@ class SessionStoreTests(unittest.TestCase):
         self.assertEqual(loaded.messages[1].content, "第一条回答")
         self.assertEqual(len(loaded.latest_logs), 1)
         self.assertEqual(loaded.latest_search_results[0].title, "来源")
-        self.assertEqual(loaded.latest_tool_observations[0].tool, "search")
+        self.assertEqual(loaded.latest_tool_observations[0].tool, "search_web")
 
     def test_list_sessions_sorts_by_updated_time(self):
         first = self.append_turn("第一个问题", "第一个回答")

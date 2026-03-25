@@ -1085,7 +1085,10 @@
         }
 
         function setCanvasUsed(toolObservations) {
-            const used = (toolObservations || []).some((item) => item.tool === 'canvas' && item.status === 'success');
+            const used = (toolObservations || []).some((item) => (
+                item.status === 'success'
+                && (item.tool === 'canvas' || item.tool === 'save_markdown_artifact')
+            ));
             canvasUsedTag.classList.toggle('hidden', !used);
         }
 

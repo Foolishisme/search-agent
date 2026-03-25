@@ -31,6 +31,11 @@ class CanvasDraft(BaseModel):
     content: str
 
 
+class ToolCall(BaseModel):
+    name: Literal["search_web", "save_markdown_artifact"]
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
 class AgentAction(BaseModel):
     action: Literal["search", "canvas", "final"]
     query: str | None = None
@@ -46,7 +51,7 @@ class RuntimeLog(BaseModel):
 
 class ToolObservation(BaseModel):
     step: int
-    tool: Literal["search", "canvas"]
+    tool: Literal["search", "canvas", "search_web", "save_markdown_artifact"]
     status: Literal["success", "error"]
     message: str
     data: dict[str, Any] = Field(default_factory=dict)

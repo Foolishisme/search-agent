@@ -7,6 +7,10 @@
 - 轻规划执行链路
   - `direct_answer`
   - `information_gathering`
+- 自有统一 Tool Schema
+  - `search_web`
+  - `save_markdown_artifact`
+  - 当前 runtime 已统一走工具注册与执行入口
 - 搜索阶段动态重试
   - 最多 3 次搜索尝试
   - 搜索后由模型判断 `answer / retry / stop`
@@ -59,6 +63,8 @@
 5. 生成最终答案
 6. 如果用户明确要求保存 Markdown 文档，再执行 Canvas 后处理
 7. 本轮成功后才写入会话记忆
+
+当前执行层还没有切到模型厂商原生 function calling，但已经先统一成自有 tool schema。这样后续如果要接 OpenAI / Anthropic / Gemini / DeepSeek 的原生工具调用协议，可以直接复用同一组工具定义与执行器。
 
 ## 技术栈
 
