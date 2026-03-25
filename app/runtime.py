@@ -17,11 +17,11 @@ class RunCancelledError(RuntimeError):
 class AgentRuntime:
     MAX_SEARCH_ATTEMPTS = 3
 
-    def __init__(self, llm_client: Any, search_tool: TavilySearchTool, artifact_store: Any) -> None:
+    def __init__(self, llm_client: Any, search_tool: TavilySearchTool, artifact_store: Any, python_executor: Any | None = None) -> None:
         self.llm_client = llm_client
         self.search_tool = search_tool
         self.artifact_store = artifact_store
-        self.tool_executor = ToolExecutor(search_tool=search_tool, artifact_store=artifact_store)
+        self.tool_executor = ToolExecutor(search_tool=search_tool, artifact_store=artifact_store, python_executor=python_executor)
 
     async def run(
         self,
@@ -92,6 +92,7 @@ class AgentRuntime:
                 latest_query = next_query or await self._suggest_search_query(
                     normalized_question,
                     tool_observations,
+                    plan,
                     conversation,
                     attachments,
                     logs,
@@ -116,6 +117,7 @@ class AgentRuntime:
                 decision = await self._assess_search_progress(
                     normalized_question,
                     tool_observations,
+                    plan,
                     conversation,
                     attachments,
                     logs,
@@ -136,11 +138,26 @@ class AgentRuntime:
                     logs.append(limit_log)
                     yield {"type": "log", "log": limit_log}
                 break
+        elif plan.route == "python_execution":
+            ensure_not_cancelled()
+            python_log, python_observation = await self._execute_python_step(
+                normalized_question,
+                plan,
+                conversation,
+                attachments,
+                logs,
+            )
+            logs.append(python_log)
+            tool_observations.append(python_observation)
+            yield {"type": "log", "log": python_log}
+            yield {"type": "tool_result", "result": python_observation.model_dump(mode="json")}
+            yield {"type": "status", "message": "Python execution finished"}
 
         ensure_not_cancelled()
         answer = await self._generate_final_answer(
             normalized_question,
             tool_observations,
+            plan,
             conversation,
             attachments,
             logs,
@@ -150,6 +167,7 @@ class AgentRuntime:
             canvas_payload = await self._execute_canvas_postprocess(
                 question=normalized_question,
                 answer=answer,
+                plan=plan,
                 conversation=conversation,
                 attachments=attachments,
                 session_id=session_id,
@@ -204,6 +222,7 @@ class AgentRuntime:
         self,
         question: str,
         tool_observations: list[ToolObservation],
+        plan: Any,
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
         logs: list[RuntimeLog],
@@ -212,6 +231,7 @@ class AgentRuntime:
             return await self.llm_client.suggest_search_query(
                 question,
                 [item.model_dump(mode="json") for item in tool_observations],
+                plan=plan,
                 conversation=conversation,
                 attachments=attachments,
             )
@@ -243,6 +263,7 @@ class AgentRuntime:
         self,
         question: str,
         tool_observations: list[ToolObservation],
+        plan: Any,
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
         logs: list[RuntimeLog],
@@ -251,6 +272,7 @@ class AgentRuntime:
             return await self.llm_client.assess_search_progress(
                 question,
                 [item.model_dump(mode="json") for item in tool_observations],
+                plan=plan,
                 conversation=conversation,
                 attachments=attachments,
             )
@@ -263,6 +285,7 @@ class AgentRuntime:
         self,
         question: str,
         tool_observations: list[ToolObservation],
+        plan: Any,
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
         logs: list[RuntimeLog],
@@ -271,6 +294,7 @@ class AgentRuntime:
             return await self.llm_client.final_answer(
                 question,
                 [item.model_dump(mode="json") for item in tool_observations],
+                plan=plan,
                 conversation=conversation,
                 attachments=attachments,
             )
@@ -279,10 +303,48 @@ class AgentRuntime:
             logs.append(error_log)
             raise RuntimeError(str(exc)) from exc
 
+    async def _execute_python_step(
+        self,
+        question: str,
+        plan: Any,
+        conversation: list[ConversationMessage],
+        attachments: list[AttachmentContext],
+        logs: list[RuntimeLog],
+    ) -> tuple[RuntimeLog, ToolObservation]:
+        try:
+            draft = await self.llm_client.build_python_script(
+                question,
+                plan=plan,
+                conversation=conversation,
+                attachments=attachments,
+            )
+        except LLMClientError as exc:
+            error_log = RuntimeLog(stage="error", message=f"Python script generation failed: {exc}")
+            logs.append(error_log)
+            raise RuntimeError(str(exc)) from exc
+
+        code_log = RuntimeLog(stage="python", message="Generated Python script for WSL execution")
+        logs.append(code_log)
+
+        outcome = await self.tool_executor.call(
+            ToolCall(
+                name="execute_python_wsl",
+                arguments={"code": draft.code},
+            ),
+            step=500 + len(question),
+        )
+        result_log = RuntimeLog(
+            stage="python",
+            message=f"Tool execute_python_wsl finished with status={outcome.observation.status}"
+            + (f", exit_code={outcome.payload['exit_code']}" if "exit_code" in outcome.payload else ""),
+        )
+        return result_log, outcome.observation
+
     async def _execute_canvas_postprocess(
         self,
         question: str,
         answer: str,
+        plan: Any,
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
         session_id: str | None,
@@ -294,6 +356,7 @@ class AgentRuntime:
             draft = await self.llm_client.build_canvas_document(
                 question,
                 answer,
+                plan=plan,
                 conversation=conversation,
                 attachments=attachments,
             )

@@ -15,7 +15,7 @@ class SearchResult(BaseModel):
 
 
 class ExecutionPlan(BaseModel):
-    route: Literal["direct_answer", "information_gathering"]
+    route: Literal["direct_answer", "information_gathering", "python_execution"]
     canvas_requested: bool = False
     rationale: str | None = None
 
@@ -31,8 +31,13 @@ class CanvasDraft(BaseModel):
     content: str
 
 
+class PythonScriptDraft(BaseModel):
+    code: str
+    rationale: str | None = None
+
+
 class ToolCall(BaseModel):
-    name: Literal["search_web", "save_markdown_artifact"]
+    name: Literal["search_web", "save_markdown_artifact", "execute_python_wsl"]
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -45,13 +50,13 @@ class AgentAction(BaseModel):
 
 
 class RuntimeLog(BaseModel):
-    stage: Literal["input", "plan", "thought", "search", "canvas", "final", "error"]
+    stage: Literal["input", "plan", "thought", "search", "python", "canvas", "final", "error"]
     message: str
 
 
 class ToolObservation(BaseModel):
     step: int
-    tool: Literal["search", "canvas", "search_web", "save_markdown_artifact"]
+    tool: Literal["search", "canvas", "search_web", "save_markdown_artifact", "execute_python_wsl"]
     status: Literal["success", "error"]
     message: str
     data: dict[str, Any] = Field(default_factory=dict)

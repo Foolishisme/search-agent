@@ -17,6 +17,9 @@ class Settings:
     search_top_k: int
     llm_request_timeout: float
     search_request_timeout: float
+    python_execution_timeout: float
+    wsl_distro_name: str | None
+    wsl_python_command: str
     log_level: str
     proxy_url: str | None
 
@@ -32,6 +35,9 @@ def get_settings() -> Settings:
         search_top_k=int(os.getenv("SEARCH_TOP_K", "10")),
         llm_request_timeout=float(os.getenv("LLM_REQUEST_TIMEOUT", "90")),
         search_request_timeout=float(os.getenv("SEARCH_REQUEST_TIMEOUT", "20")),
+        python_execution_timeout=float(os.getenv("PYTHON_EXECUTION_TIMEOUT", "30")),
+        wsl_distro_name=os.getenv("WSL_DISTRO_NAME", "Ubuntu-24.04").strip() or None,
+        wsl_python_command=os.getenv("WSL_PYTHON_COMMAND", "python3").strip(),
         log_level=os.getenv("LOG_LEVEL", "INFO").strip(),
         proxy_url=proxy_url,
     )

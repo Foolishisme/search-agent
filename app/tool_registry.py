@@ -3,6 +3,7 @@ from typing import Any
 
 from app.artifact_store import ArtifactStoreError, MarkdownArtifactStore
 from app.artifact_tool import SAVE_MARKDOWN_ARTIFACT_TOOL, save_markdown_artifact
+from app.python_executor import PythonExecutionError, WSLPythonExecutor
 from app.schemas import ToolCall, ToolObservation
 from app.search_tool import SearchToolError, TavilySearchTool
 
@@ -24,9 +25,28 @@ SEARCH_WEB_TOOL = {
     },
 }
 
+EXECUTE_PYTHON_WSL_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "execute_python_wsl",
+        "description": "Execute Python code inside WSL and return stdout, stderr, and exit code.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "The complete Python code to execute.",
+                },
+            },
+            "required": ["code"],
+        },
+    },
+}
+
 TOOL_SCHEMAS = [
     SEARCH_WEB_TOOL,
     SAVE_MARKDOWN_ARTIFACT_TOOL,
+    EXECUTE_PYTHON_WSL_TOOL,
 ]
 
 
@@ -43,9 +63,15 @@ class ToolExecutionError(RuntimeError):
 
 
 class ToolExecutor:
-    def __init__(self, search_tool: TavilySearchTool, artifact_store: MarkdownArtifactStore) -> None:
+    def __init__(
+        self,
+        search_tool: TavilySearchTool,
+        artifact_store: MarkdownArtifactStore,
+        python_executor: WSLPythonExecutor | None = None,
+    ) -> None:
         self.search_tool = search_tool
         self.artifact_store = artifact_store
+        self.python_executor = python_executor
 
     @property
     def tool_schemas(self) -> list[dict[str, Any]]:
@@ -57,6 +83,9 @@ class ToolExecutor:
 
         if call.name == "save_markdown_artifact":
             return self._save_markdown_artifact(call, step=step)
+
+        if call.name == "execute_python_wsl":
+            return await self._execute_python_wsl(call, step=step)
 
         observation = ToolObservation(
             step=step,
@@ -162,3 +191,65 @@ class ToolExecutor:
             observation=observation,
             payload={"artifact": artifact},
         )
+
+    async def _execute_python_wsl(self, call: ToolCall, *, step: int) -> ToolExecutionOutcome:
+        if self.python_executor is None:
+            observation = ToolObservation(
+                step=step,
+                tool="execute_python_wsl",
+                status="error",
+                message="Python execution tool is not configured",
+                data={"arguments": call.arguments},
+            )
+            raise ToolExecutionError(observation)
+
+        code = str(call.arguments.get("code", "")).strip()
+        if not code:
+            observation = ToolObservation(
+                step=step,
+                tool="execute_python_wsl",
+                status="error",
+                message="Python code cannot be empty",
+                data={"arguments": call.arguments},
+            )
+            raise ToolExecutionError(observation)
+
+        try:
+            result = await self.python_executor.execute(code)
+            status = "success" if result.exit_code == 0 else "error"
+            message = "Python code executed successfully" if result.exit_code == 0 else "Python code exited with an error"
+            observation = ToolObservation(
+                step=step,
+                tool="execute_python_wsl",
+                status=status,
+                message=message,
+                data={
+                    "exit_code": result.exit_code,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                },
+            )
+            return ToolExecutionOutcome(
+                observation=observation,
+                payload={
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "exit_code": result.exit_code,
+                },
+            )
+        except PythonExecutionError as exc:
+            observation = ToolObservation(
+                step=step,
+                tool="execute_python_wsl",
+                status="error",
+                message=str(exc),
+                data={},
+            )
+            return ToolExecutionOutcome(
+                observation=observation,
+                payload={
+                    "stdout": "",
+                    "stderr": str(exc),
+                    "exit_code": None,
+                },
+            )

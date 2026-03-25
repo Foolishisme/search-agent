@@ -13,6 +13,7 @@ from app.artifact_tool import save_markdown_artifact
 from app.config import get_settings
 from app.llm_client import DeepSeekClient
 from app.logger import setup_logger
+from app.python_executor import WSLPythonExecutor
 from app.run_manager import RunRegistry, SessionStateGuard
 from app.runtime import AgentRuntime, RunCancelledError
 from app.schemas import ArtifactDetail, ArtifactSummary, AskRequest, AskResponse, SessionDetail, SessionSummary
@@ -35,6 +36,12 @@ runtime = AgentRuntime(
     llm_client=DeepSeekClient(settings),
     search_tool=TavilySearchTool(settings),
     artifact_store=artifact_store,
+    python_executor=WSLPythonExecutor(
+        BASE_DIR / "target" / "temp",
+        distro_name=settings.wsl_distro_name,
+        python_command=settings.wsl_python_command,
+        timeout=settings.python_execution_timeout,
+    ),
 )
 
 

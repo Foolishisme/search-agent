@@ -4,8 +4,9 @@ from pathlib import Path
 
 from app.artifact_store import MarkdownArtifactStore
 from app.llm_client import LLMClientError
+from app.python_executor import PythonExecutionResult
 from app.runtime import AgentRuntime, RunCancelledError
-from app.schemas import AttachmentContext, CanvasDraft, ConversationMessage, ExecutionPlan, SearchDecision, SearchResult
+from app.schemas import AttachmentContext, CanvasDraft, ConversationMessage, ExecutionPlan, PythonScriptDraft, SearchDecision, SearchResult
 from app.search_tool import SearchToolError
 
 
@@ -18,6 +19,7 @@ class FakeLLMClient:
         decisions: list[SearchDecision] | None = None,
         final_answer_text: str = "final answer",
         canvas_draft: CanvasDraft | None = None,
+        python_draft: PythonScriptDraft | None = None,
         error: Exception | None = None,
     ) -> None:
         self.plan_result = plan or ExecutionPlan(route="direct_answer", canvas_requested=False)
@@ -25,6 +27,7 @@ class FakeLLMClient:
         self.decisions = list(decisions or [])
         self.final_answer_text = final_answer_text
         self.canvas_draft = canvas_draft or CanvasDraft(title="Document", content="# Document")
+        self.python_draft = python_draft or PythonScriptDraft(code="print('ok')", rationale="default")
         self.error = error
         self.histories: list[list[dict]] = []
         self.conversations: list[list[ConversationMessage]] = []
@@ -44,6 +47,7 @@ class FakeLLMClient:
         self,
         question: str,
         history: list[dict],
+        plan: ExecutionPlan | None = None,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
     ) -> str:
@@ -58,6 +62,7 @@ class FakeLLMClient:
         self,
         question: str,
         history: list[dict],
+        plan: ExecutionPlan | None = None,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
     ) -> SearchDecision:
@@ -72,6 +77,7 @@ class FakeLLMClient:
         self,
         question: str,
         history: list[dict],
+        plan: ExecutionPlan | None = None,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
     ) -> str:
@@ -84,12 +90,24 @@ class FakeLLMClient:
         self,
         question: str,
         answer: str,
+        plan: ExecutionPlan | None = None,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
     ) -> CanvasDraft:
         if self.error is not None:
             raise self.error
         return self.canvas_draft
+
+    async def build_python_script(
+        self,
+        question: str,
+        plan: ExecutionPlan | None = None,
+        conversation: list[ConversationMessage] | None = None,
+        attachments: list[AttachmentContext] | None = None,
+    ) -> PythonScriptDraft:
+        if self.error is not None:
+            raise self.error
+        return self.python_draft
 
 
 class FakeSearchTool:
@@ -105,6 +123,19 @@ class FakeSearchTool:
         if self.results:
             return self.results.pop(0)
         return []
+
+
+class FakePythonExecutor:
+    def __init__(self, result: PythonExecutionResult | None = None, error: Exception | None = None):
+        self.result = result or PythonExecutionResult(stdout="ok\n", stderr="", exit_code=0)
+        self.error = error
+        self.codes: list[str] = []
+
+    async def execute(self, code: str) -> PythonExecutionResult:
+        self.codes.append(code)
+        if self.error is not None:
+            raise self.error
+        return self.result
 
 
 class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
@@ -132,6 +163,30 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(response.query)
         self.assertEqual(response.search_results, [])
         self.assertEqual([log.stage for log in response.logs], ["input", "plan", "final"])
+
+    async def test_python_execution_then_final(self):
+        python_executor = FakePythonExecutor(
+            result=PythonExecutionResult(stdout="3\n", stderr="", exit_code=0)
+        )
+        llm_client = FakeLLMClient(
+            plan=ExecutionPlan(route="python_execution", canvas_requested=False),
+            python_draft=PythonScriptDraft(code="print(1 + 2)", rationale="simple math"),
+            final_answer_text="The Python result is 3.",
+        )
+        runtime = AgentRuntime(
+            llm_client=llm_client,
+            search_tool=FakeSearchTool(),
+            artifact_store=self.artifact_store,
+            python_executor=python_executor,
+        )
+
+        response = await runtime.run("Use Python to calculate 1 + 2")
+
+        self.assertEqual(response.answer, "The Python result is 3.")
+        self.assertFalse(response.need_search)
+        self.assertEqual(python_executor.codes, ["print(1 + 2)"])
+        self.assertTrue(any(item.tool == "execute_python_wsl" for item in response.tool_observations))
+        self.assertTrue(any(log.stage == "python" for log in response.logs))
 
     async def test_information_gathering_then_final(self):
         results = [SearchResult(title="Title", snippet="Snippet", url="https://example.com")]

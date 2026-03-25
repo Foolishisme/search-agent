@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from app.python_executor import PythonExecutionResult
 from app.artifact_store import MarkdownArtifactStore
 from app.schemas import SearchResult, ToolCall
 from app.tool_registry import TOOL_SCHEMAS, ToolExecutionError, ToolExecutor
@@ -20,6 +21,17 @@ class FakeSearchTool:
         return []
 
 
+class FakePythonExecutor:
+    def __init__(self, result: PythonExecutionResult | None = None, error: Exception | None = None):
+        self.result = result or PythonExecutionResult(stdout="ok\n", stderr="", exit_code=0)
+        self.error = error
+
+    async def execute(self, code: str) -> PythonExecutionResult:
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
 class ToolRegistryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
@@ -32,6 +44,7 @@ class ToolRegistryTests(unittest.IsolatedAsyncioTestCase):
         names = [item["function"]["name"] for item in TOOL_SCHEMAS]
         self.assertIn("search_web", names)
         self.assertIn("save_markdown_artifact", names)
+        self.assertIn("execute_python_wsl", names)
 
     async def test_search_web_tool_returns_standard_observation(self):
         executor = ToolExecutor(
@@ -72,6 +85,28 @@ class ToolRegistryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outcome.observation.tool, "save_markdown_artifact")
         self.assertEqual(outcome.observation.status, "success")
         self.assertEqual(outcome.payload["artifact"].title, "Guide")
+
+    async def test_execute_python_wsl_tool_returns_standard_observation(self):
+        executor = ToolExecutor(
+            search_tool=FakeSearchTool(),
+            artifact_store=self.artifact_store,
+            python_executor=FakePythonExecutor(
+                result=PythonExecutionResult(stdout="3\n", stderr="", exit_code=0)
+            ),
+        )
+
+        outcome = await executor.call(
+            ToolCall(
+                name="execute_python_wsl",
+                arguments={"code": "print(1 + 2)"},
+            ),
+            step=3,
+        )
+
+        self.assertEqual(outcome.observation.tool, "execute_python_wsl")
+        self.assertEqual(outcome.observation.status, "success")
+        self.assertEqual(outcome.payload["stdout"], "3\n")
+        self.assertEqual(outcome.payload["exit_code"], 0)
 
     async def test_search_web_tool_returns_error_observation_for_invalid_arguments(self):
         executor = ToolExecutor(
