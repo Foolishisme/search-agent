@@ -1,19 +1,24 @@
 # Minimal Search Agent
 
-一个基于 `FastAPI` 的轻量 Search Agent Demo。当前版本已经不再是最早的单轮问答原型，而是一个包含会话记忆、流式输出、搜索增强、附件、Canvas 文档、Mermaid 渲染和中断回滚能力的可运行 demo。
+一个基于 `FastAPI` 的轻量 Search Agent Demo。当前版本已经不是最早的单轮问答原型，而是一个包含会话记忆、流式输出、搜索增强、附件、Canvas 文档、Mermaid 渲染、中断回滚和 WSL Python 执行能力的可运行 demo。
 
 ## 当前能力
 
 - 轻规划执行链路
   - `direct_answer`
   - `information_gathering`
-- 自有统一 Tool Schema
+  - `python_execution`
+- 统一 Tool Schema
   - `search_web`
   - `save_markdown_artifact`
-  - 当前 runtime 已统一走工具注册与执行入口
+  - `execute_python_wsl`
 - 搜索阶段动态重试
   - 最多 3 次搜索尝试
   - 搜索后由模型判断 `answer / retry / stop`
+- WSL Python 执行
+  - 临时脚本写入 `target/temp/`
+  - 执行后返回 `stdout / stderr / exit_code`
+  - 执行结束删除临时脚本
 - 流式问答接口
   - `POST /api/ask/stream`
   - NDJSON 事件流
@@ -32,10 +37,10 @@
 - Mermaid 渲染
   - 回答区和 Canvas 预览支持 ` ```mermaid ` 代码块
 - 每轮过程可见
-  - 执行日志会挂在对应回答上
+  - 执行日志挂在对应回答下
   - 流式生成时展开，完成后折叠
 - 左侧历史会话
-  - 可展开/收起
+  - 可展开 / 收起
 
 ## 当前架构
 
@@ -44,8 +49,9 @@
 ```text
 用户问题
   -> Planner
-  -> route = direct_answer | information_gathering
+  -> route = direct_answer | information_gathering | python_execution
   -> information_gathering 内部按需搜索与重试
+  -> python_execution 内部生成 Python 并执行
   -> Final Answer
   -> Canvas Postprocess(optional)
   -> 提交完整轮次
@@ -56,21 +62,57 @@
 1. 前端提交问题和可选附件
 2. Runtime 调用 Planner，决定粗方向
 3. 如果需要外部信息，进入 `information_gathering`
-4. 搜索结果返回后，模型判断：
-   - 直接回答
-   - 再搜一次
-   - 停止搜索并基于现有信息回答
-5. 生成最终答案
-6. 如果用户明确要求保存 Markdown 文档，再执行 Canvas 后处理
-7. 本轮成功后才写入会话记忆
+4. 如果需要代码执行，进入 `python_execution`
+5. 搜索或 Python 工具结果回填为统一 `ToolObservation`
+6. 生成最终答案
+7. 如果用户明确要求保存 Markdown 文档，再执行 Canvas 后处理
+8. 本轮成功后才写入会话记忆
 
-当前执行层还没有切到模型厂商原生 function calling，但已经先统一成自有 tool schema。这样后续如果要接 OpenAI / Anthropic / Gemini / DeepSeek 的原生工具调用协议，可以直接复用同一组工具定义与执行器。
+## Prompt 分层
+
+当前模型看到的是三层上下文，而不是单一大 prompt：
+
+1. 全局工具上下文
+   - 当前有哪些工具
+   - 每个工具的用途和参数
+2. 当前计划
+   - `direct_answer / information_gathering / python_execution`
+   - 是否请求 Canvas
+3. 当前进展 / 工具结果
+   - 已执行过哪些工具
+   - 成功还是失败
+   - 当前已有的结果和证据
+
+这样做的目的，是让模型同时知道：
+
+- 我有什么能力
+- 这轮准备怎么做
+- 现在已经做到哪一步了
+
+## 当前工具
+
+### `search_web`
+
+查询公开网页信息，返回标准化搜索结果。
+
+### `save_markdown_artifact`
+
+创建或更新当前会话的 Markdown 文档。
+
+### `execute_python_wsl`
+
+在 WSL 中执行 Python 代码，返回：
+
+- `stdout`
+- `stderr`
+- `exit_code`
 
 ## 技术栈
 
 - Backend: `FastAPI`
 - LLM: `DeepSeek`
 - Search: `Tavily`
+- Python Execution: `WSL + python3`
 - Frontend: 原生 `HTML / CSS / JS`
 - Markdown: `marked` + `DOMPurify`
 - Diagram: `Mermaid`
@@ -87,6 +129,8 @@ app/
   attachment_store.py
   artifact_store.py
   artifact_tool.py
+  tool_registry.py
+  python_executor.py
   run_manager.py
   schemas.py
 templates/
@@ -96,6 +140,7 @@ target/
   sessions/
   uploads/
   artifacts/
+  temp/
 ```
 
 ## 安装
@@ -124,6 +169,9 @@ copy .env.example .env
 - `SEARCH_TOP_K=10`
 - `LLM_REQUEST_TIMEOUT=90`
 - `SEARCH_REQUEST_TIMEOUT=20`
+- `PYTHON_EXECUTION_TIMEOUT=30`
+- `WSL_DISTRO_NAME=Ubuntu-24.04`
+- `WSL_PYTHON_COMMAND=python3`
 - `LOG_LEVEL=INFO`
 - `PROXY_URL=`
 
@@ -171,7 +219,9 @@ flowchart TD
     B --> C{"route"}
     C -->|"direct_answer"| D["直接回答"]
     C -->|"information_gathering"| E["搜索与重试"]
+    C -->|"python_execution"| F["WSL Python 执行"]
     E --> D
+    F --> D
 ```
 ````
 
@@ -199,9 +249,9 @@ flowchart TD
 
 ## 当前边界
 
-- 还没有 Python 沙盒执行
+- 还没有模型厂商原生 function calling
 - 还没有真正的 token 级流式生成
-- 还没有接模型厂商原生 function calling
+- WSL Python 执行目前只返回文本结果，还没有完整文件产物展示
 - Mermaid 目前只有前端渲染，没有专门的语法纠错
 - 统计图表还没有独立图表引擎
 
@@ -211,13 +261,13 @@ flowchart TD
 
 ### 1. 标准 Tool Calling
 
-把当前的 planner / search decision / canvas postprocess 逐步过渡到更标准的 tool calling 协议。
+把当前的自有 tool schema 逐步过渡到模型厂商原生 tool calling 协议。
 
 收益：
 
 - 工具边界更清楚
 - 更接近业界主流实现
-- 后续加工具更自然
+- 后续扩工具更自然
 
 ### 2. 图表能力
 
@@ -232,15 +282,14 @@ flowchart TD
 - 饼图
 - 散点图
 
-### 3. Python 沙盒执行
+### 3. Python 执行增强
 
-如果后续要支持数据分析、绘图、代码运行，建议增加受控 Python 执行环境。
+当前已经支持 WSL Python 执行。后续可继续增强：
 
-优先级较高的产物：
-
-- 文本输出
-- CSV
-- PNG / SVG 图表
+- 文件产物回传
+- 图片图表预览
+- 数据文件下载
+- 更细的错误信息和资源限制
 
 ### 4. 更强的搜索评估与收口
 
@@ -257,7 +306,7 @@ flowchart TD
 
 - 输入区更紧凑
 - Canvas 工作区更像独立面板
-- 引用来源默认更轻
+- Python 执行结果独立展示
 - 移动端布局适配
 
 ### 6. 可观测性与评估
