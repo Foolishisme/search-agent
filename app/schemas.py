@@ -14,6 +14,23 @@ class SearchResult(BaseModel):
     url: str
 
 
+class ExecutionPlan(BaseModel):
+    route: Literal["direct_answer", "information_gathering"]
+    canvas_requested: bool = False
+    rationale: str | None = None
+
+
+class SearchDecision(BaseModel):
+    next: Literal["answer", "retry", "stop"]
+    reason: str | None = None
+    query: str | None = None
+
+
+class CanvasDraft(BaseModel):
+    title: str
+    content: str
+
+
 class AgentAction(BaseModel):
     action: Literal["search", "canvas", "final"]
     query: str | None = None
@@ -23,7 +40,7 @@ class AgentAction(BaseModel):
 
 
 class RuntimeLog(BaseModel):
-    stage: Literal["input", "thought", "search", "canvas", "final", "error"]
+    stage: Literal["input", "plan", "thought", "search", "canvas", "final", "error"]
     message: str
 
 

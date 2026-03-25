@@ -42,9 +42,17 @@
             padding: 24px;
         }
 
+        .layout.sidebar-collapsed {
+            gap: 0;
+        }
+
         .sidebar {
             width: 320px;
             flex-shrink: 0;
+        }
+
+        .layout.sidebar-collapsed .sidebar {
+            display: none;
         }
 
         .main {
@@ -72,7 +80,7 @@
 
         .main-grid {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 320px;
+            grid-template-columns: minmax(0, 1fr);
             gap: 20px;
             align-items: start;
         }
@@ -91,7 +99,7 @@
         }
 
         .session-toolbar-card {
-            grid-column: 1 / span 2;
+            grid-column: 1;
         }
 
         .conversation-card,
@@ -101,7 +109,7 @@
         }
 
         .side-card {
-            grid-column: 2;
+            grid-column: 1;
             padding: 0;
             overflow: hidden;
         }
@@ -304,6 +312,12 @@
         }
 
         .message-sources {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--line);
+        }
+
+        .message-logs {
             margin-top: 16px;
             padding-top: 16px;
             border-top: 1px solid var(--line);
@@ -811,7 +825,10 @@
                                 <span id="canvas-used-tag" class="attachment-chip hidden">已使用 Canvas 工具</span>
                             </div>
                         </div>
-                        <button id="delete-session" class="danger" disabled>删除记忆</button>
+                        <div class="composer-tools">
+                            <button id="toggle-history" class="secondary small" type="button">隐藏历史</button>
+                            <button id="delete-session" class="danger" disabled>删除记忆</button>
+                        </div>
                     </div>
                     <div>
                         <p class="meta">会话附件</p>
@@ -831,6 +848,7 @@
                 <section class="panel card answer-card">
                     <h2>本轮答案</h2>
                     <div class="answer-shell">
+                        <div id="live-logs" class="hidden"></div>
                         <div id="answer" class="answer-markdown">
                             <p class="placeholder">等待提问...</p>
                         </div>
@@ -935,11 +953,13 @@
     <script>
         const submitButton = document.getElementById('submit');
         const newSessionButton = document.getElementById('new-session');
+        const toggleHistoryButton = document.getElementById('toggle-history');
         const deleteSessionButton = document.getElementById('delete-session');
         const attachTrigger = document.getElementById('attach-trigger');
         const fileInput = document.getElementById('file-input');
         const questionInput = document.getElementById('question');
         const liveAnswerCardElement = document.querySelector('.answer-card');
+        const liveLogsElement = document.getElementById('live-logs');
         const answerElement = document.getElementById('answer');
         const sourcesElement = document.getElementById('sources');
         const sourcesListElement = document.getElementById('sources-list');
@@ -954,6 +974,7 @@
         const errorElement = document.getElementById('error');
         const conversationElement = document.getElementById('conversation');
         const sessionListElement = document.getElementById('session-list');
+        const layoutElement = document.querySelector('.layout');
         const mainGridElement = document.querySelector('.main-grid');
         const composerContainerElement = document.querySelector('.floating-composer');
         const sessionToolbarCardElement = document.querySelector('.session-toolbar-card');
@@ -1009,6 +1030,16 @@
             const nextHeight = Math.min(questionInput.scrollHeight, 220);
             questionInput.style.height = `${Math.max(nextHeight, 40)}px`;
             questionInput.style.overflowY = questionInput.scrollHeight > 220 ? 'auto' : 'hidden';
+        }
+
+        function updateHistoryToggle() {
+            const collapsed = layoutElement.classList.contains('sidebar-collapsed');
+            toggleHistoryButton.textContent = collapsed ? '显示历史' : '隐藏历史';
+        }
+
+        function toggleHistorySidebar() {
+            layoutElement.classList.toggle('sidebar-collapsed');
+            updateHistoryToggle();
         }
 
         function setSessionMeta() {
@@ -1232,6 +1263,7 @@
 
         function resetRoundOutput() {
             latestSearchResults = [];
+            renderLiveLogs([]);
             answerElement.innerHTML = '<p class="placeholder">等待提问...</p>';
             hideLiveAnswer();
             sourcesElement.hidden = true;
@@ -1277,6 +1309,54 @@
                 item.textContent = `[${log.stage}] ${log.message}`;
                 logsElement.appendChild(item);
             });
+        }
+
+        function buildLogsBlock(logs, options = {}) {
+            if (!logs || !logs.length) {
+                return null;
+            }
+
+            const { open = false, className = 'message-logs', title = '执行日志' } = options;
+            const wrapper = document.createElement('details');
+            wrapper.className = className;
+            wrapper.open = open;
+
+            const summary = document.createElement('summary');
+            summary.className = 'source-toggle';
+            summary.innerHTML = `
+                <div class="source-toggle-copy">
+                    <span class="source-toggle-title">${escapeHtml(title)}</span>
+                    <span class="meta">${logs.length} 条日志</span>
+                </div>
+                <span class="source-toggle-hint">${open ? '执行中' : '点开查看'}</span>
+            `;
+            wrapper.appendChild(summary);
+
+            const shell = document.createElement('div');
+            shell.className = 'source-list-shell stack';
+            logs.forEach((log) => {
+                const item = document.createElement('div');
+                item.className = 'log-item';
+                item.textContent = `[${log.stage}] ${log.message}`;
+                shell.appendChild(item);
+            });
+            wrapper.appendChild(shell);
+            return wrapper;
+        }
+
+        function renderLiveLogs(logs) {
+            liveLogsElement.innerHTML = '';
+            if (!logs.length) {
+                liveLogsElement.classList.add('hidden');
+                return;
+            }
+            const block = buildLogsBlock(logs, { open: true, className: 'message-logs', title: '本轮执行日志' });
+            if (!block) {
+                liveLogsElement.classList.add('hidden');
+                return;
+            }
+            liveLogsElement.appendChild(block);
+            liveLogsElement.classList.remove('hidden');
         }
 
         function renderResults(results) {
@@ -1406,11 +1486,62 @@
         }
 
         function showLiveAnswer() {
+            renderLiveLogs([]);
             liveAnswerCardElement.classList.remove('hidden');
         }
 
         function hideLiveAnswer() {
             liveAnswerCardElement.classList.add('hidden');
+        }
+
+        function renderTurns(turns = [], latestResults = []) {
+            conversationElement.innerHTML = '';
+            if (!turns.length) {
+                conversationElement.innerHTML = '<div class="placeholder">当前会话为空。</div>';
+                return;
+            }
+
+            turns.forEach((turn, index) => {
+                const userItem = document.createElement('div');
+                userItem.className = 'message user';
+                userItem.innerHTML = `
+                    <div class="message-role">
+                        <span>用户</span>
+                        <span>${escapeHtml(turn.created_at || '')}</span>
+                    </div>
+                    <div class="message-content">${escapeHtml(turn.question || '')}</div>
+                `;
+                conversationElement.appendChild(userItem);
+
+                const assistantItem = document.createElement('div');
+                assistantItem.className = 'message assistant';
+                assistantItem.innerHTML = `
+                    <div class="message-role">
+                        <span>Assistant</span>
+                        <span>${escapeHtml(turn.created_at || '')}</span>
+                    </div>
+                    <div class="markdown-content">${renderMarkdown(turn.answer || '')}</div>
+                `;
+
+                const logsBlock = buildLogsBlock(Array.isArray(turn.logs) ? turn.logs : [], {
+                    open: false,
+                    className: 'message-logs',
+                    title: '本轮执行日志',
+                });
+                if (logsBlock) {
+                    assistantItem.appendChild(logsBlock);
+                }
+
+                const turnResults = Array.isArray(turn.search_results) ? turn.search_results : [];
+                if (turnResults.length) {
+                    assistantItem.appendChild(buildSourcesBlock(turnResults));
+                } else if (index === turns.length - 1 && latestResults.length) {
+                    assistantItem.appendChild(buildSourcesBlock(latestResults));
+                }
+
+                conversationElement.appendChild(assistantItem);
+            });
+            void renderMermaidIn(conversationElement);
         }
 
         function renderConversation(messages, latestResults = []) {
@@ -1466,6 +1597,10 @@
             const resultsCard = resultsPanel.closest('.side-card');
             if (resultsCard) {
                 resultsCard.classList.add('hidden');
+            }
+            const logsCard = logsPanel.closest('.side-card');
+            if (logsCard) {
+                logsCard.classList.add('hidden');
             }
             autosizeQuestionInput();
         }
@@ -1578,9 +1713,9 @@
                     : '';
                 latestSearchResults = data.latest_search_results || [];
                 setSessionMeta();
-                renderConversation(data.messages || [], latestSearchResults);
+                renderTurns(data.turns || [], latestSearchResults);
                 hideLiveAnswer();
-                renderLogs(data.latest_logs || []);
+                renderLiveLogs([]);
                 renderSessionAttachments(data.attachments || []);
                 setCanvasUsed(data.latest_tool_observations || []);
                 await loadArtifacts(data.session_id);
@@ -1679,8 +1814,7 @@
                             statusElement.textContent = event.message || '';
                         } else if (event.type === 'log') {
                             liveLogs.push(event.log);
-                            renderLogs(liveLogs);
-                            logsPanel.open = true;
+                            renderLiveLogs(liveLogs);
                         } else if (event.type === 'tool_result') {
                             liveToolObservations.push(event.result);
                             setCanvasUsed(liveToolObservations);
@@ -1695,11 +1829,7 @@
                             latestAnswerMarkdown = data.answer || '';
                             latestSearchResults = data.search_results || [];
                             setSessionMeta();
-                            renderConversation(data.conversation || [], latestSearchResults);
-                            hideLiveAnswer();
-                            renderLogs(data.logs || []);
-                            renderSessionAttachments(data.attachments || []);
-                            setCanvasUsed(data.tool_observations || []);
+                            await loadSessionDetail(data.session_id);
                             statusElement.textContent = data.need_search
                                 ? `已完成，触发搜索：${data.query || ''}`
                                 : '已完成，未触发搜索';
@@ -1707,8 +1837,6 @@
                             autosizeQuestionInput();
                             pendingFiles = [];
                             renderPendingFiles();
-                            await loadArtifacts(data.session_id);
-                            await loadSessions();
                             finishActiveRun();
                         } else if (event.type === 'cancelled') {
                             if (activeRunBaseSessionId) {
@@ -1748,6 +1876,7 @@
             }
             await deleteSession(currentSessionId);
         });
+        toggleHistoryButton.addEventListener('click', toggleHistorySidebar);
 
         attachTrigger.addEventListener('click', () => fileInput.click());
         fileInput.addEventListener('change', () => {
@@ -1839,6 +1968,7 @@
         });
 
         initializeConversationLayout();
+        updateHistoryToggle();
         startNewSession();
         renderLogs([]);
         renderPendingFiles();

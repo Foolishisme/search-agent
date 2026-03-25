@@ -40,6 +40,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn('class="floating-composer"', response.text)
         self.assertIn('id="logs-panel"', response.text)
         self.assertIn('id="create-artifact"', response.text)
+        self.assertIn('id="toggle-history"', response.text)
         self.assertIn('id="artifact-panel"', response.text)
         self.assertIn('id="download-artifact"', response.text)
         self.assertIn('id="sources-count-text"', response.text)

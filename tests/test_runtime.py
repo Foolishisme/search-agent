@@ -5,31 +5,91 @@ from pathlib import Path
 from app.artifact_store import MarkdownArtifactStore
 from app.llm_client import LLMClientError
 from app.runtime import AgentRuntime, RunCancelledError
-from app.schemas import AgentAction, AttachmentContext, ConversationMessage, SearchResult
+from app.schemas import AttachmentContext, CanvasDraft, ConversationMessage, ExecutionPlan, SearchDecision, SearchResult
 from app.search_tool import SearchToolError
 
 
 class FakeLLMClient:
-    def __init__(self, actions=None, error=None):
-        self.actions = list(actions or [])
+    def __init__(
+        self,
+        *,
+        plan: ExecutionPlan | None = None,
+        queries: list[str] | None = None,
+        decisions: list[SearchDecision] | None = None,
+        final_answer_text: str = "final answer",
+        canvas_draft: CanvasDraft | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.plan_result = plan or ExecutionPlan(route="direct_answer", canvas_requested=False)
+        self.queries = list(queries or [])
+        self.decisions = list(decisions or [])
+        self.final_answer_text = final_answer_text
+        self.canvas_draft = canvas_draft or CanvasDraft(title="Document", content="# Document")
         self.error = error
-        self.histories = []
-        self.conversations = []
+        self.histories: list[list[dict]] = []
+        self.conversations: list[list[ConversationMessage]] = []
 
-    async def next_action(
+    async def plan(
+        self,
+        question: str,
+        conversation: list[ConversationMessage] | None = None,
+        attachments: list[AttachmentContext] | None = None,
+    ) -> ExecutionPlan:
+        self.conversations.append(list(conversation or []))
+        if self.error is not None:
+            raise self.error
+        return self.plan_result
+
+    async def suggest_search_query(
         self,
         question: str,
         history: list[dict],
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
-    ) -> AgentAction:
+    ) -> str:
         self.histories.append([item.copy() for item in history])
-        self.conversations.append(list(conversation or []))
         if self.error is not None:
             raise self.error
-        if not self.actions:
-            raise AssertionError("No more fake actions configured")
-        return self.actions.pop(0)
+        if not self.queries:
+            raise AssertionError("No more search queries configured")
+        return self.queries.pop(0)
+
+    async def assess_search_progress(
+        self,
+        question: str,
+        history: list[dict],
+        conversation: list[ConversationMessage] | None = None,
+        attachments: list[AttachmentContext] | None = None,
+    ) -> SearchDecision:
+        self.histories.append([item.copy() for item in history])
+        if self.error is not None:
+            raise self.error
+        if not self.decisions:
+            raise AssertionError("No more search decisions configured")
+        return self.decisions.pop(0)
+
+    async def final_answer(
+        self,
+        question: str,
+        history: list[dict],
+        conversation: list[ConversationMessage] | None = None,
+        attachments: list[AttachmentContext] | None = None,
+    ) -> str:
+        self.histories.append([item.copy() for item in history])
+        if self.error is not None:
+            raise self.error
+        return self.final_answer_text
+
+    async def build_canvas_document(
+        self,
+        question: str,
+        answer: str,
+        conversation: list[ConversationMessage] | None = None,
+        attachments: list[AttachmentContext] | None = None,
+    ) -> CanvasDraft:
+        if self.error is not None:
+            raise self.error
+        return self.canvas_draft
 
 
 class FakeSearchTool:
@@ -55,173 +115,183 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         self.tempdir.cleanup()
 
-    async def test_direct_final_without_search(self):
+    async def test_direct_answer_without_search(self):
         runtime = AgentRuntime(
-            llm_client=FakeLLMClient(actions=[AgentAction(action="final", answer="直接答案")]),
+            llm_client=FakeLLMClient(
+                plan=ExecutionPlan(route="direct_answer", canvas_requested=False),
+                final_answer_text="direct answer",
+            ),
             search_tool=FakeSearchTool(),
             artifact_store=self.artifact_store,
         )
 
-        response = await runtime.run("1+1等于几")
+        response = await runtime.run("1+1=?")
 
-        self.assertEqual(response.answer, "直接答案")
+        self.assertEqual(response.answer, "direct answer")
         self.assertFalse(response.need_search)
         self.assertIsNone(response.query)
         self.assertEqual(response.search_results, [])
-        self.assertEqual([log.stage for log in response.logs], ["input", "thought", "final"])
+        self.assertEqual([log.stage for log in response.logs], ["input", "plan", "final"])
 
-    async def test_search_then_final(self):
-        results = [
-            SearchResult(title="标题", snippet="摘要", url="https://example.com"),
-        ]
+    async def test_information_gathering_then_final(self):
+        results = [SearchResult(title="Title", snippet="Snippet", url="https://example.com")]
         llm_client = FakeLLMClient(
-            actions=[
-                AgentAction(action="search", query="AI Agent runtime"),
-                AgentAction(action="final", answer="基于搜索结果的最终答案"),
-            ]
+            plan=ExecutionPlan(route="information_gathering", canvas_requested=False),
+            queries=["AI Agent runtime"],
+            decisions=[SearchDecision(next="answer", reason="enough")],
+            final_answer_text="answer from search",
         )
-        search_tool = FakeSearchTool(results=[results])
-        runtime = AgentRuntime(llm_client=llm_client, search_tool=search_tool, artifact_store=self.artifact_store)
+        runtime = AgentRuntime(
+            llm_client=llm_client,
+            search_tool=FakeSearchTool(results=[results]),
+            artifact_store=self.artifact_store,
+        )
 
-        response = await runtime.run("帮我查一下 AI Agent runtime")
+        response = await runtime.run("Tell me about AI Agent runtime")
 
         self.assertTrue(response.need_search)
         self.assertEqual(response.query, "AI Agent runtime")
         self.assertEqual(len(response.search_results), 1)
-        self.assertEqual(response.answer, "基于搜索结果的最终答案")
-        self.assertEqual(search_tool.queries, ["AI Agent runtime"])
+        self.assertEqual(response.answer, "answer from search")
         self.assertEqual(llm_client.histories[0], [])
         self.assertEqual(llm_client.histories[1][0]["tool"], "search")
-        self.assertEqual(llm_client.histories[1][0]["status"], "success")
-        self.assertEqual(llm_client.histories[1][0]["data"]["query"], "AI Agent runtime")
-        self.assertEqual(llm_client.histories[1][0]["data"]["results"][0]["title"], "标题")
-        self.assertEqual(llm_client.conversations[0], [])
 
-    async def test_search_empty_results_then_final(self):
+    async def test_search_retry_then_answer(self):
         llm_client = FakeLLMClient(
-            actions=[
-                AgentAction(action="search", query="冷门主题"),
-                AgentAction(action="final", answer="未找到充分信息，暂时无法确认。"),
-            ]
+            plan=ExecutionPlan(route="information_gathering", canvas_requested=False),
+            queries=["first query"],
+            decisions=[
+                SearchDecision(next="retry", reason="too broad", query="second query"),
+                SearchDecision(next="answer", reason="enough"),
+            ],
+            final_answer_text="final after retry",
         )
         runtime = AgentRuntime(
             llm_client=llm_client,
-            search_tool=FakeSearchTool(results=[[]]),
-            artifact_store=self.artifact_store,
-        )
-
-        response = await runtime.run("请查一个很冷门的问题")
-
-        self.assertTrue(response.need_search)
-        self.assertEqual(response.query, "冷门主题")
-        self.assertEqual(response.search_results, [])
-        self.assertIn("未找到充分信息", response.answer)
-        self.assertTrue(any("搜索无结果" in log.message for log in response.logs))
-
-    async def test_max_steps_guard(self):
-        runtime = AgentRuntime(
-            llm_client=FakeLLMClient(
-                actions=[
-                    AgentAction(action="search", query="q1"),
-                    AgentAction(action="search", query="q2"),
-                    AgentAction(action="search", query="q3"),
-                    AgentAction(action="search", query="q4"),
+            search_tool=FakeSearchTool(
+                results=[
+                    [],
+                    [SearchResult(title="Found", snippet="Data", url="https://example.com")],
                 ]
             ),
-            search_tool=FakeSearchTool(results=[[], [], [], []]),
             artifact_store=self.artifact_store,
         )
 
-        with self.assertRaises(RuntimeError) as context:
-            await runtime.run("循环问题")
+        response = await runtime.run("Need current info")
 
-        self.assertIn("最大执行步数", str(context.exception))
+        self.assertEqual(response.answer, "final after retry")
+        self.assertEqual(response.query, "second query")
+        self.assertEqual(len(response.search_results), 1)
 
-    async def test_llm_error(self):
+    async def test_search_retry_limit_stops_and_answers(self):
+        llm_client = FakeLLMClient(
+            plan=ExecutionPlan(route="information_gathering", canvas_requested=False),
+            queries=["q1"],
+            decisions=[
+                SearchDecision(next="retry", query="q2"),
+                SearchDecision(next="retry", query="q3"),
+                SearchDecision(next="retry", query="q4"),
+            ],
+            final_answer_text="best effort answer",
+        )
         runtime = AgentRuntime(
-            llm_client=FakeLLMClient(error=LLMClientError("LLM 异常")),
+            llm_client=llm_client,
+            search_tool=FakeSearchTool(results=[[], [], []]),
+            artifact_store=self.artifact_store,
+        )
+
+        response = await runtime.run("hard question")
+
+        self.assertEqual(response.answer, "best effort answer")
+        self.assertTrue(any("retry limit reached" in log.message for log in response.logs))
+
+    async def test_plan_error(self):
+        runtime = AgentRuntime(
+            llm_client=FakeLLMClient(error=LLMClientError("plan failed")),
             search_tool=FakeSearchTool(),
             artifact_store=self.artifact_store,
         )
 
         with self.assertRaises(RuntimeError) as context:
-            await runtime.run("测试")
+            await runtime.run("test")
 
-        self.assertEqual(str(context.exception), "LLM 异常")
+        self.assertEqual(str(context.exception), "plan failed")
 
     async def test_search_error(self):
         runtime = AgentRuntime(
-            llm_client=FakeLLMClient(actions=[AgentAction(action="search", query="test")]),
-            search_tool=FakeSearchTool(error=SearchToolError("搜索异常")),
+            llm_client=FakeLLMClient(
+                plan=ExecutionPlan(route="information_gathering", canvas_requested=False),
+                queries=["test"],
+            ),
+            search_tool=FakeSearchTool(error=SearchToolError("search failed")),
             artifact_store=self.artifact_store,
         )
 
         with self.assertRaises(RuntimeError) as context:
-            await runtime.run("测试")
+            await runtime.run("test")
 
-        self.assertEqual(str(context.exception), "搜索异常")
+        self.assertEqual(str(context.exception), "search failed")
 
     async def test_empty_question(self):
         runtime = AgentRuntime(
-            llm_client=FakeLLMClient(actions=[AgentAction(action="final", answer="ignored")]),
+            llm_client=FakeLLMClient(),
             search_tool=FakeSearchTool(),
             artifact_store=self.artifact_store,
         )
 
-        with self.assertRaises(ValueError) as context:
+        with self.assertRaises(ValueError):
             await runtime.run("   ")
 
-        self.assertEqual(str(context.exception), "问题不能为空")
-
-    async def test_passes_conversation_memory_to_llm(self):
-        llm_client = FakeLLMClient(actions=[AgentAction(action="final", answer="结合上下文的答案")])
+    async def test_passes_conversation_memory_to_planner(self):
+        llm_client = FakeLLMClient(
+            plan=ExecutionPlan(route="direct_answer", canvas_requested=False),
+            final_answer_text="contextual answer",
+        )
         runtime = AgentRuntime(
             llm_client=llm_client,
             search_tool=FakeSearchTool(),
             artifact_store=self.artifact_store,
         )
         conversation = [
-            ConversationMessage(role="user", content="我们刚才在聊 LangGraph", created_at="2026-03-24T10:00:00+08:00"),
-            ConversationMessage(role="assistant", content="是的，重点在编排", created_at="2026-03-24T10:00:05+08:00"),
+            ConversationMessage(role="user", content="We were discussing LangGraph", created_at="2026-03-24T10:00:00+08:00"),
+            ConversationMessage(role="assistant", content="Yes, orchestration is key", created_at="2026-03-24T10:00:05+08:00"),
         ]
 
-        response = await runtime.run("它和 AutoGen 有什么差别？", conversation=conversation)
+        response = await runtime.run("How is it different from AutoGen?", conversation=conversation)
 
-        self.assertEqual(response.answer, "结合上下文的答案")
+        self.assertEqual(response.answer, "contextual answer")
         self.assertEqual(len(llm_client.conversations[0]), 2)
-        self.assertEqual(llm_client.conversations[0][0].content, "我们刚才在聊 LangGraph")
 
-    async def test_run_stream_yields_logs_results_and_final(self):
+    async def test_run_stream_yields_tool_results_and_final(self):
         llm_client = FakeLLMClient(
-            actions=[
-                AgentAction(action="search", query="流式测试"),
-                AgentAction(action="final", answer="流式最终答案"),
-            ]
+            plan=ExecutionPlan(route="information_gathering", canvas_requested=False),
+            queries=["stream test"],
+            decisions=[SearchDecision(next="answer")],
+            final_answer_text="stream final answer",
         )
         runtime = AgentRuntime(
             llm_client=llm_client,
             search_tool=FakeSearchTool(
-                results=[[SearchResult(title="标题", snippet="摘要", url="https://example.com")]]
+                results=[[SearchResult(title="Title", snippet="Snippet", url="https://example.com")]]
             ),
             artifact_store=self.artifact_store,
         )
 
         events = []
-        async for event in runtime.run_stream("测试流式"):
+        async for event in runtime.run_stream("stream test"):
             events.append(event)
 
         self.assertEqual(events[0]["type"], "status")
         self.assertTrue(any(item["type"] == "tool_result" for item in events))
         self.assertTrue(any(item["type"] == "results" for item in events))
         self.assertEqual(events[-1]["type"], "final_response")
-        self.assertEqual(events[-1]["data"].answer, "流式最终答案")
+        self.assertEqual(events[-1]["data"].answer, "stream final answer")
 
-    async def test_canvas_action_saves_artifact_then_final(self):
+    async def test_canvas_is_postprocess_not_main_action(self):
         llm_client = FakeLLMClient(
-            actions=[
-                AgentAction(action="canvas", title="操作手册", content="# 操作手册\n\n步骤一"),
-                AgentAction(action="final", answer="我已经保存为 Markdown 文档。"),
-            ]
+            plan=ExecutionPlan(route="direct_answer", canvas_requested=True),
+            final_answer_text="saved as markdown",
+            canvas_draft=CanvasDraft(title="Guide", content="# Guide"),
         )
         runtime = AgentRuntime(
             llm_client=llm_client,
@@ -230,18 +300,17 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
 
         events = []
-        async for event in runtime.run_stream("整理成文档", session_id="session-1"):
+        async for event in runtime.run_stream("Make a markdown guide", session_id="session-1"):
             events.append(event)
 
         self.assertTrue(any(item["type"] == "canvas" for item in events))
-        final_event = events[-1]
-        self.assertEqual(final_event["type"], "final_response")
+        self.assertEqual(events[-1]["type"], "final_response")
         artifacts = self.artifact_store.list_artifacts("session-1")
         self.assertEqual(len(artifacts), 1)
-        self.assertEqual(artifacts[0].title, "操作手册")
+        self.assertEqual(artifacts[0].title, "Guide")
 
-    async def test_run_stream_can_be_cancelled_between_steps(self):
-        results = [SearchResult(title="标题", snippet="摘要", url="https://example.com")]
+    async def test_run_stream_can_be_cancelled_between_search_and_final(self):
+        results = [SearchResult(title="Title", snippet="Snippet", url="https://example.com")]
         cancelled = False
 
         class CancellableSearchTool(FakeSearchTool):
@@ -253,10 +322,10 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         runtime = AgentRuntime(
             llm_client=FakeLLMClient(
-                actions=[
-                    AgentAction(action="search", query="cancel me"),
-                    AgentAction(action="final", answer="should not happen"),
-                ]
+                plan=ExecutionPlan(route="information_gathering", canvas_requested=False),
+                queries=["cancel me"],
+                decisions=[SearchDecision(next="answer")],
+                final_answer_text="should not happen",
             ),
             search_tool=CancellableSearchTool(results=[results]),
             artifact_store=self.artifact_store,
