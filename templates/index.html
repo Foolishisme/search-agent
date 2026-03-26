@@ -297,6 +297,30 @@
             color: var(--muted);
         }
 
+        .message-role-main,
+        .message-role-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        .copy-message {
+            padding: 4px 8px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.8);
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1;
+        }
+
+        .copy-message:hover {
+            color: var(--accent);
+            border-color: rgba(47, 111, 237, 0.3);
+            background: rgba(47, 111, 237, 0.08);
+        }
+
         .log-item,
         .result-item {
             padding: 12px 14px;
@@ -523,6 +547,54 @@
         .mermaid {
             overflow-x: auto;
             padding: 8px 0;
+        }
+
+        .svg-card {
+            margin: 12px 0;
+            border: 1px solid #e5dac8;
+            border-radius: 16px;
+            background: #fffdfa;
+            overflow: hidden;
+        }
+
+        .svg-card-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 14px;
+            border-bottom: 1px solid #efe4d3;
+            background: #fcf7ef;
+        }
+
+        .svg-card-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #111827;
+        }
+
+        .svg-card-meta {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .svg-stage {
+            overflow-x: auto;
+            padding: 16px;
+        }
+
+        .svg-stage svg {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            margin: 0 auto;
+        }
+
+        .svg-error {
+            padding: 14px 16px;
+            color: #9b1c24;
+            font-size: 13px;
+            background: rgba(201, 75, 83, 0.06);
         }
 
         .answer-markdown blockquote,
@@ -1025,6 +1097,54 @@
                 .replaceAll('"', '&quot;');
         }
 
+        function encodeCopyValue(value) {
+            return encodeURIComponent(value || '');
+        }
+
+        async function copyTextToClipboard(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(text);
+                return;
+            }
+
+            const helper = document.createElement('textarea');
+            helper.value = text;
+            helper.setAttribute('readonly', '');
+            helper.style.position = 'fixed';
+            helper.style.opacity = '0';
+            helper.style.pointerEvents = 'none';
+            document.body.appendChild(helper);
+            helper.focus();
+            helper.select();
+            const succeeded = document.execCommand('copy');
+            document.body.removeChild(helper);
+            if (!succeeded) {
+                throw new Error('复制失败，请检查剪贴板权限');
+            }
+        }
+
+        function bindCopyButtons(container) {
+            if (!container) {
+                return;
+            }
+            container.querySelectorAll('.copy-message').forEach((button) => {
+                if (button.dataset.bound === 'true') {
+                    return;
+                }
+                button.dataset.bound = 'true';
+                button.addEventListener('click', async () => {
+                    const rawText = decodeURIComponent(button.dataset.copyText || '');
+                    try {
+                        await copyTextToClipboard(rawText);
+                        statusElement.textContent = '已复制到剪贴板';
+                        errorElement.textContent = '';
+                    } catch (error) {
+                        errorElement.textContent = error.message || '复制失败，请检查剪贴板权限';
+                    }
+                });
+            });
+        }
+
         function autosizeQuestionInput() {
             questionInput.style.height = 'auto';
             const nextHeight = Math.min(questionInput.scrollHeight, 220);
@@ -1255,13 +1375,111 @@
             });
         }
 
+        function sanitizeSvgMarkup(svgText) {
+            if (!svgText || !window.DOMPurify) {
+                return '';
+            }
+
+            const sanitized = window.DOMPurify.sanitize(svgText, {
+                USE_PROFILES: { svg: true, svgFilters: true },
+                FORBID_TAGS: ['script', 'foreignObject', 'iframe', 'object', 'embed'],
+                FORBID_ATTR: ['onload', 'onclick', 'onerror', 'onmouseover', 'onfocus'],
+            }).trim();
+
+            if (!sanitized) {
+                return '';
+            }
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(sanitized, 'image/svg+xml');
+            if (doc.querySelector('parsererror')) {
+                return '';
+            }
+
+            const svg = doc.documentElement;
+            if (!svg || svg.tagName.toLowerCase() !== 'svg') {
+                return '';
+            }
+
+            const blockedTags = ['script', 'foreignobject', 'iframe', 'object', 'embed'];
+            if (blockedTags.some((tag) => svg.querySelector(tag))) {
+                return '';
+            }
+
+            const nodes = [svg, ...svg.querySelectorAll('*')];
+            nodes.forEach((node) => {
+                Array.from(node.attributes).forEach((attribute) => {
+                    const name = attribute.name.toLowerCase();
+                    const value = attribute.value.trim().toLowerCase();
+                    if (name.startsWith('on')) {
+                        node.removeAttribute(attribute.name);
+                        return;
+                    }
+                    if ((name === 'href' || name === 'xlink:href') && value.startsWith('javascript:')) {
+                        node.removeAttribute(attribute.name);
+                    }
+                });
+            });
+
+            return svg.outerHTML;
+        }
+
+        function renderSvgIn(container) {
+            if (!container) {
+                return;
+            }
+
+            const blocks = Array.from(container.querySelectorAll('pre code.language-svg, pre code.lang-svg'));
+            if (!blocks.length) {
+                return;
+            }
+
+            blocks.forEach((block) => {
+                const pre = block.closest('pre');
+                if (!pre) {
+                    return;
+                }
+
+                const svgMarkup = sanitizeSvgMarkup(block.textContent || '');
+                const card = document.createElement('div');
+                card.className = 'svg-card';
+
+                if (!svgMarkup) {
+                    card.innerHTML = `
+                        <div class="svg-card-head">
+                            <span class="svg-card-title">SVG 图形</span>
+                            <span class="svg-card-meta">渲染失败</span>
+                        </div>
+                        <div class="svg-error">SVG 内容无效或未通过安全校验。</div>
+                    `;
+                    pre.replaceWith(card);
+                    return;
+                }
+
+                card.innerHTML = `
+                    <div class="svg-card-head">
+                        <span class="svg-card-title">SVG 图形</span>
+                        <span class="svg-card-meta">独立组件渲染</span>
+                    </div>
+                    <div class="svg-stage">${svgMarkup}</div>
+                `;
+                pre.replaceWith(card);
+            });
+        }
+
+        async function renderRichBlocksIn(container) {
+            await renderMermaidIn(container);
+            renderSvgIn(container);
+        }
+
         function renderMarkdownInto(container, markdownText, wrapperClass = '') {
             if (!container) {
                 return;
             }
             const html = renderMarkdown(markdownText);
             container.innerHTML = wrapperClass ? `<div class="${wrapperClass}">${html}</div>` : html;
-            void renderMermaidIn(container);
+            void renderRichBlocksIn(container);
+            bindCopyButtons(container);
         }
 
         function resetRoundOutput() {
@@ -1544,7 +1762,7 @@
 
                 conversationElement.appendChild(assistantItem);
             });
-            void renderMermaidIn(conversationElement);
+            void renderRichBlocksIn(conversationElement);
         }
 
         function renderConversation(messages, latestResults = []) {
@@ -1580,8 +1798,114 @@
                 }
                 conversationElement.appendChild(item);
             });
-            void renderMermaidIn(conversationElement);
+            void renderRichBlocksIn(conversationElement);
         }
+
+        function renderTurnsWithCopy(turns = [], latestResults = []) {
+            conversationElement.innerHTML = '';
+            if (!turns.length) {
+                conversationElement.innerHTML = '<div class="placeholder">当前会话为空。</div>';
+                return;
+            }
+
+            turns.forEach((turn, index) => {
+                const userItem = document.createElement('div');
+                userItem.className = 'message user';
+                userItem.innerHTML = `
+                    <div class="message-role">
+                        <div class="message-role-main">
+                            <span>用户</span>
+                            <span>${escapeHtml(turn.created_at || '')}</span>
+                        </div>
+                        <div class="message-role-actions">
+                            <button class="copy-message" type="button" data-copy-text="${encodeCopyValue(turn.question || '')}">复制</button>
+                        </div>
+                    </div>
+                    <div class="message-content">${escapeHtml(turn.question || '')}</div>
+                `;
+                conversationElement.appendChild(userItem);
+
+                const assistantItem = document.createElement('div');
+                assistantItem.className = 'message assistant';
+                assistantItem.innerHTML = `
+                    <div class="message-role">
+                        <div class="message-role-main">
+                            <span>Assistant</span>
+                            <span>${escapeHtml(turn.created_at || '')}</span>
+                        </div>
+                        <div class="message-role-actions">
+                            <button class="copy-message" type="button" data-copy-text="${encodeCopyValue(turn.answer || '')}">复制</button>
+                        </div>
+                    </div>
+                    <div class="markdown-content">${renderMarkdown(turn.answer || '')}</div>
+                `;
+
+                const logsBlock = buildLogsBlock(Array.isArray(turn.logs) ? turn.logs : [], {
+                    open: false,
+                    className: 'message-logs',
+                    title: '本轮执行日志',
+                });
+                if (logsBlock) {
+                    assistantItem.appendChild(logsBlock);
+                }
+
+                const turnResults = Array.isArray(turn.search_results) ? turn.search_results : [];
+                if (turnResults.length) {
+                    assistantItem.appendChild(buildSourcesBlock(turnResults));
+                } else if (index === turns.length - 1 && latestResults.length) {
+                    assistantItem.appendChild(buildSourcesBlock(latestResults));
+                }
+
+                conversationElement.appendChild(assistantItem);
+            });
+            void renderRichBlocksIn(conversationElement);
+            bindCopyButtons(conversationElement);
+        }
+
+        function renderConversationWithCopy(messages, latestResults = []) {
+            conversationElement.innerHTML = '';
+            if (!messages.length) {
+                conversationElement.innerHTML = '<div class="placeholder">当前会话为空。</div>';
+                return;
+            }
+
+            let latestAssistantIndex = -1;
+            for (let index = messages.length - 1; index >= 0; index -= 1) {
+                if (messages[index].role === 'assistant') {
+                    latestAssistantIndex = index;
+                    break;
+                }
+            }
+
+            messages.forEach((message, index) => {
+                const item = document.createElement('div');
+                item.className = `message ${message.role}`;
+                const renderedContent = message.role === 'assistant'
+                    ? `<div class="markdown-content">${renderMarkdown(message.content || '')}</div>`
+                    : `<div class="message-content">${escapeHtml(message.content || '')}</div>`;
+                item.innerHTML = `
+                    <div class="message-role">
+                        <div class="message-role-main">
+                            <span>${message.role === 'user' ? '用户' : 'Assistant'}</span>
+                            <span>${escapeHtml(message.created_at || '')}</span>
+                        </div>
+                        <div class="message-role-actions">
+                            <button class="copy-message" type="button" data-copy-text="${encodeCopyValue(message.content || '')}">复制</button>
+                        </div>
+                    </div>
+                    ${renderedContent}
+                `;
+                if (message.role === 'assistant' && index === latestAssistantIndex && latestResults.length) {
+                    item.appendChild(buildSourcesBlock(latestResults));
+                }
+                conversationElement.appendChild(item);
+            });
+            void renderRichBlocksIn(conversationElement);
+            bindCopyButtons(conversationElement);
+        }
+
+        renderTurns = renderTurnsWithCopy;
+        renderConversation = renderConversationWithCopy;
 
         function initializeConversationLayout() {
             if (artifactShellElement && sessionToolbarCardElement && artifactShellElement.parentElement !== sessionToolbarCardElement) {

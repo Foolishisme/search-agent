@@ -1,6 +1,15 @@
 # Minimal Search Agent
 
-一个基于 `FastAPI` 的轻量 Search Agent Demo。当前版本已经不是最早的单轮问答原型，而是一个包含会话记忆、流式输出、搜索增强、附件、Canvas 文档、Mermaid 渲染、中断回滚和 WSL Python 执行能力的可运行 demo。
+一个基于 `FastAPI` 的轻量 Search Agent Demo。当前版本已经不是最早的单轮问答原型，而是一套可运行的最小 Agent 系统，包含：
+
+- 会话记忆
+- 流式输出
+- 搜索增强
+- 附件上传
+- Canvas Markdown 文档
+- Mermaid / SVG 渲染
+- 中断回滚
+- WSL Python 执行
 
 ## 当前能力
 
@@ -36,9 +45,15 @@
   - 支持生成、编辑、保存、下载
 - Mermaid 渲染
   - 回答区和 Canvas 预览支持 ` ```mermaid ` 代码块
+- SVG 渲染
+  - 回答区和 Canvas 预览支持 ` ```svg ` 代码块
+  - 前端按独立组件渲染，并做基础安全清洗
 - 每轮过程可见
   - 执行日志挂在对应回答下
   - 流式生成时展开，完成后折叠
+- 复制能力
+  - 支持复制每轮 Assistant 输出
+  - 支持复制历史用户输入
 - 左侧历史会话
   - 可展开 / 收起
 
@@ -83,7 +98,7 @@
    - 成功还是失败
    - 当前已有的结果和证据
 
-这样做的目的，是让模型同时知道：
+这样做的目的是让模型同时知道：
 
 - 我有什么能力
 - 这轮准备怎么做
@@ -106,6 +121,24 @@
 - `stdout`
 - `stderr`
 - `exit_code`
+
+## Python 执行环境
+
+当前 Python 执行走 WSL，而不是 Windows 本机 Python。
+
+推荐配置：
+
+- `WSL_DISTRO_NAME=Ubuntu-24.04`
+- `WSL_PYTHON_COMMAND=/home/wyf/.venvs/search-agent/bin/python`
+
+当前 WSL 虚拟环境已安装基础包：
+
+- `matplotlib`
+- `pandas`
+- `seaborn`
+- `numpy`
+
+如果修改 `.env` 中的 WSL Python 配置，需要重启服务后才会生效。
 
 ## 技术栈
 
@@ -171,7 +204,7 @@ copy .env.example .env
 - `SEARCH_REQUEST_TIMEOUT=20`
 - `PYTHON_EXECUTION_TIMEOUT=30`
 - `WSL_DISTRO_NAME=Ubuntu-24.04`
-- `WSL_PYTHON_COMMAND=python3`
+- `WSL_PYTHON_COMMAND=/home/wyf/.venvs/search-agent/bin/python`
 - `LOG_LEVEL=INFO`
 - `PROXY_URL=`
 
@@ -225,13 +258,30 @@ flowchart TD
 ```
 ````
 
-当前更适合使用 Mermaid 的场景：
+更适合 Mermaid 的场景：
 
 - 流程图
 - 时序图
 - 架构图
 
-如果要做柱状图、折线图、饼图等统计图表，后续更建议接入 `ECharts` 或 `Chart.js`，而不是继续用 Mermaid 模拟数据图表。
+## SVG 使用方式
+
+回答区和 Canvas 预览支持 SVG 代码块，例如：
+
+````md
+```svg
+<svg width="240" height="120" viewBox="0 0 240 120" xmlns="http://www.w3.org/2000/svg">
+  <rect x="10" y="10" width="220" height="100" rx="16" fill="#f6efe3" stroke="#2f6fed"/>
+  <text x="120" y="68" text-anchor="middle" font-size="20" fill="#1f2937">Hello SVG</text>
+</svg>
+```
+````
+
+当前实现会：
+
+- 识别 ` ```svg ` 代码块
+- 前端单独组件渲染
+- 对 SVG 内容做基础安全清洗
 
 ## 中断策略
 
@@ -240,7 +290,7 @@ flowchart TD
 - 运行中可以取消
 - 取消后当前轮次不写入正式会话记忆
 - 前端恢复到上一轮已完成状态
-- 本轮附件与 Canvas 副作用回滚
+- 本轮附件和 Canvas 副作用回滚
 
 也就是说：
 
@@ -252,28 +302,23 @@ flowchart TD
 - 还没有模型厂商原生 function calling
 - 还没有真正的 token 级流式生成
 - WSL Python 执行目前只返回文本结果，还没有完整文件产物展示
-- Mermaid 目前只有前端渲染，没有专门的语法纠错
+- Mermaid / SVG 目前只有前端渲染，没有更深的纠错和调试信息
 - 统计图表还没有独立图表引擎
 
 ## 下一步升级优化方向
 
-建议按下面几个方向推进，优先级从高到低：
+建议按下面几个方向推进：
 
 ### 1. 标准 Tool Calling
 
-把当前的自有 tool schema 逐步过渡到模型厂商原生 tool calling 协议。
-
-收益：
-
-- 工具边界更清楚
-- 更接近业界主流实现
-- 后续扩工具更自然
+把当前自有 tool schema 逐步过渡到模型厂商原生 tool calling 协议。
 
 ### 2. 图表能力
 
-当前只支持 Mermaid，更适合流程图和结构图。下一步建议增加：
+当前只支持 Mermaid 和 SVG，更适合流程图和简单矢量图。下一步建议接入：
 
-- `ECharts` 或 `Chart.js`
+- `ECharts`
+- `Chart.js`
 
 用于：
 
@@ -284,43 +329,37 @@ flowchart TD
 
 ### 3. Python 执行增强
 
-当前已经支持 WSL Python 执行。后续可继续增强：
+后续可以继续补：
 
-- 文件产物回传
-- 图片图表预览
-- 数据文件下载
-- 更细的错误信息和资源限制
+- 图片 / CSV / JSON 文件产物回传
+- 图表预览
+- 更细的错误信息
+- 更明确的资源限制
 
-### 4. 更强的搜索评估与收口
+### 4. 搜索评估与收口
 
-当前已经有轻量搜索重试。后续可以继续增强：
+继续增强：
 
-- 查询改写更稳定
-- 搜索结果去重
+- 查询改写
+- 结果去重
 - 更清楚地表达“公开信息不足”
 - 更合理的来源筛选
 
 ### 5. UI 信息架构继续收紧
 
-当前 UI 已经从“全局面板”逐步调整成“每轮回答挂对应日志与引用”。后续还可以继续优化：
+例如：
 
-- 输入区更紧凑
+- 输入区进一步压紧
 - Canvas 工作区更像独立面板
 - Python 执行结果独立展示
-- 移动端布局适配
+- 移动端适配继续优化
 
 ### 6. 可观测性与评估
 
-如果 demo 要继续往产品走，这会越来越重要：
+如果 demo 继续往产品走，这部分会越来越重要：
 
 - 每轮 trace
 - 工具调用统计
-- 失败原因归类
-- 搜索命中率和回答质量评估
-
-## 测试
-
-```bash
-python -m unittest discover -s tests -v
-python -m compileall app tests
-```
+- 成本统计
+- 成功率 / 失败率评估
+- 回放与调试能力

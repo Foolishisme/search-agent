@@ -46,6 +46,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn('id="sources-count-text"', response.text)
         self.assertIn(">发送问题<", response.text)
         self.assertIn("Canvas Tool", response.text)
+        self.assertIn("svg-card", response.text)
+        self.assertIn("copy-message", response.text)
 
     def test_favicon(self):
         response = self.client.get("/favicon.ico")

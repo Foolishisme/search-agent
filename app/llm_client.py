@@ -247,6 +247,8 @@ class DeepSeekClient:
             "If public information is insufficient, say so plainly instead of inventing facts.\n"
             "If the user asks about your available tools or whether you can execute code, answer based on the available tools listed below.\n"
             "Do not claim that you have no tools when tools are listed in the prompt.\n"
+            "If the user explicitly asks for a simple vector diagram, you may output a fenced ```svg code block containing a complete <svg>...</svg> document.\n"
+            "Do not mix raw SVG into ordinary paragraphs. Use the fenced svg block format only.\n"
             f"\nQuestion: {question}\n"
             f"Available tools: {self._serialize_tools()}\n"
             f"Current plan: {self._serialize_plan(plan)}\n"
