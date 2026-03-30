@@ -712,7 +712,7 @@ import { bindCopyButtons, buildExpandableText, buildLogsBlock, buildResultLinkRo
                 item.innerHTML = `
                     <div class="session-item-head">
                         <div class="session-title">${escapeHtml(session.title)}</div>
-                        <button class="danger small" data-session-id="${escapeHtml(session.session_id)}">??</button>
+                        <button class="danger small" data-session-id="${escapeHtml(session.session_id)}">删除对话</button>
                     </div>
                     <div class="session-preview">${escapeHtml(session.last_message_preview || '暂无摘要')}</div>
                     <div class="session-time">${escapeHtml(session.updated_at)}</div>
