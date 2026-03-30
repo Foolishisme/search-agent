@@ -1,0 +1,12 @@
+{
+  "next_seq": 2,
+  "skills": [
+    {
+      "seq": 1,
+      "skill_id": "search-basics-1",
+      "name": "Search Basics",
+      "description": "基础搜索与收口规则",
+      "enabled": true
+    }
+  ]
+}

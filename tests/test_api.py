@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 import app.main as app_main
+from app.agent_config_store import AgentConfigStore
 from app.attachment_store import AttachmentStore
 from app.artifact_store import MarkdownArtifactStore
 from app.main import app
@@ -23,7 +24,9 @@ class ApiTests(unittest.TestCase):
         app_main.session_store = MarkdownSessionStore(Path(self.tempdir.name))
         app_main.attachment_store = AttachmentStore(Path(self.tempdir.name) / "uploads")
         app_main.artifact_store = MarkdownArtifactStore(Path(self.tempdir.name) / "artifacts")
+        app_main.agent_config_store = AgentConfigStore(Path(self.tempdir.name) / ".agent")
         app_main.runtime.artifact_store = app_main.artifact_store
+        app_main.runtime.agent_config_store = app_main.agent_config_store
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
@@ -48,10 +51,58 @@ class ApiTests(unittest.TestCase):
         self.assertIn("Canvas Tool", response.text)
         self.assertIn("svg-card", response.text)
         self.assertIn("copy-message", response.text)
+        self.assertIn('id="open-rules"', response.text)
+        self.assertIn('id="skill-list"', response.text)
+        self.assertIn('id="agent-config-card"', response.text)
 
     def test_favicon(self):
         response = self.client.get("/favicon.ico")
         self.assertEqual(response.status_code, 204)
+
+    def test_agent_rules_and_skill_crud(self):
+        rules_response = self.client.get("/api/agent/rules")
+        self.assertEqual(rules_response.status_code, 200)
+        self.assertEqual(rules_response.json()["content"], "")
+
+        save_rules = self.client.put("/api/agent/rules", json={"content": "Always cite uncertainty."})
+        self.assertEqual(save_rules.status_code, 200)
+        self.assertEqual(save_rules.json()["content"], "Always cite uncertainty.")
+
+        create_skill = self.client.post(
+            "/api/agent/skills",
+            json={
+                "name": "Search",
+                "description": "Search guidance",
+                "content": "Use precise dates.",
+                "enabled": True,
+            },
+        )
+        self.assertEqual(create_skill.status_code, 200)
+        skill_id = create_skill.json()["skill_id"]
+        self.assertEqual(create_skill.json()["seq"], 2)
+
+        list_skills = self.client.get("/api/agent/skills")
+        self.assertEqual(list_skills.status_code, 200)
+        self.assertEqual(len(list_skills.json()), 2)
+
+        detail = self.client.get(f"/api/agent/skills/{skill_id}")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["content"], "Use precise dates.")
+
+        update = self.client.put(
+            f"/api/agent/skills/{skill_id}",
+            json={
+                "name": "Search Updated",
+                "description": "Updated guidance",
+                "content": "Prefer official sources.",
+                "enabled": False,
+            },
+        )
+        self.assertEqual(update.status_code, 200)
+        self.assertEqual(update.json()["name"], "Search Updated")
+
+        delete = self.client.delete(f"/api/agent/skills/{skill_id}")
+        self.assertEqual(delete.status_code, 204)
 
     def test_api_ask_success_without_search(self):
         fake_response = AskResponse(

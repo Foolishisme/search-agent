@@ -177,6 +177,72 @@
             padding-right: 4px;
         }
 
+        .sidebar-group + .sidebar-group {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid var(--line);
+        }
+
+        .sidebar-group-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .sidebar-link-button {
+            width: 100%;
+            text-align: left;
+            border: 1px solid var(--line);
+            background: #fffdfa;
+            color: var(--text);
+        }
+
+        .skill-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 260px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .skill-item {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: var(--panel-alt);
+            padding: 12px;
+            text-align: left;
+            color: inherit;
+        }
+
+        .skill-item.active {
+            border-color: var(--accent);
+            background: linear-gradient(180deg, var(--accent-soft), #fffdfa);
+        }
+
+        .skill-item-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 6px;
+        }
+
+        .skill-item-title {
+            font-size: 14px;
+            font-weight: 700;
+            line-height: 1.4;
+        }
+
+        .skill-item-meta {
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
         .session-item {
             width: 100%;
             border: 1px solid var(--line);
@@ -458,6 +524,60 @@
             padding: 16px;
         }
 
+        .config-card.hidden {
+            display: none;
+        }
+
+        .config-mode-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: #fffdfa;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .config-form {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .config-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .config-field label {
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        .config-input {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: #fffdfa;
+            color: var(--text);
+            font: inherit;
+        }
+
+        .config-textarea {
+            min-height: 220px;
+        }
+
+        .config-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
         .tool-tags {
             margin-top: 12px;
             display: flex;
@@ -497,10 +617,12 @@
         .answer-markdown ul,
         .answer-markdown ol,
         .answer-markdown blockquote,
+        .answer-markdown table,
         .markdown-content p,
         .markdown-content ul,
         .markdown-content ol,
-        .markdown-content blockquote {
+        .markdown-content blockquote,
+        .markdown-content table {
             margin: 0.8em 0;
         }
 
@@ -611,6 +733,55 @@
             border: 0;
             border-top: 1px solid var(--line);
             margin: 1.2em 0;
+        }
+
+        .answer-markdown table,
+        .markdown-content table {
+            width: 100%;
+            border-collapse: collapse;
+            border-spacing: 0;
+            display: block;
+            overflow-x: auto;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: #fffdfa;
+        }
+
+        .answer-markdown thead,
+        .markdown-content thead {
+            background: #f7f1e8;
+        }
+
+        .answer-markdown th,
+        .answer-markdown td,
+        .markdown-content th,
+        .markdown-content td {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--line);
+            border-right: 1px solid var(--line);
+            text-align: left;
+            vertical-align: top;
+            min-width: 120px;
+            line-height: 1.7;
+        }
+
+        .answer-markdown tr:last-child td,
+        .markdown-content tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .answer-markdown th:last-child,
+        .answer-markdown td:last-child,
+        .markdown-content th:last-child,
+        .markdown-content td:last-child {
+            border-right: 0;
+        }
+
+        .answer-markdown th,
+        .markdown-content th {
+            font-weight: 700;
+            color: #111827;
+            white-space: nowrap;
         }
 
         .source-block {
@@ -872,6 +1043,29 @@
     <div class="layout">
         <aside class="sidebar">
             <div class="panel sidebar-panel">
+                <div class="sidebar-group">
+                    <div class="sidebar-group-head">
+                        <div>
+                            <h2>个人偏好</h2>
+                            <p class="meta">全局 rules 会在每轮请求里注入。</p>
+                        </div>
+                    </div>
+                    <button id="open-rules" class="secondary sidebar-link-button" type="button">打开全局 Rules</button>
+                </div>
+
+                <div class="sidebar-group">
+                    <div class="sidebar-group-head">
+                        <div>
+                            <h2>Skills</h2>
+                            <p class="meta">动态上下文，按需加载。</p>
+                        </div>
+                        <button id="new-skill" class="secondary small" type="button">新建</button>
+                    </div>
+                    <div id="skill-list" class="skill-list">
+                        <div class="placeholder">正在加载 skills...</div>
+                    </div>
+                </div>
+
                 <div class="header-row">
                     <div>
                         <h2>历史对话</h2>
@@ -887,6 +1081,43 @@
 
         <main class="main">
             <div class="main-grid">
+                <section id="agent-config-card" class="panel card config-card hidden">
+                    <div class="session-toolbar">
+                        <div>
+                            <h2 id="config-title">全局 Rules</h2>
+                            <p id="config-meta" class="meta">在这里维护 rules 和 skills。</p>
+                        </div>
+                        <span id="config-mode" class="config-mode-chip">rules</span>
+                    </div>
+                    <div class="config-form">
+                        <div class="config-field" id="skill-name-field" hidden>
+                            <label for="skill-name-input">Skill 名称</label>
+                            <input id="skill-name-input" class="config-input" type="text" placeholder="例如：Search" />
+                        </div>
+                        <div class="config-field" id="skill-description-field" hidden>
+                            <label for="skill-description-input">Skill 简述</label>
+                            <input id="skill-description-input" class="config-input" type="text" placeholder="一句话描述 skill 的用途" />
+                        </div>
+                        <div class="config-field" id="skill-enabled-field" hidden>
+                            <label><input id="skill-enabled-input" type="checkbox" checked /> 启用该 skill</label>
+                        </div>
+                        <div class="config-field">
+                            <label id="config-content-label" for="config-content">内容</label>
+                            <textarea id="config-content" class="config-input config-textarea" placeholder="Rules 或 Skill 内容"></textarea>
+                        </div>
+                        <div class="config-actions">
+                            <div>
+                                <p id="config-status" class="meta"></p>
+                                <p id="config-error" class="error"></p>
+                            </div>
+                            <div class="composer-tools">
+                                <button id="delete-skill" class="danger hidden" type="button">删除 Skill</button>
+                                <button id="save-config" type="button">保存</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <section class="panel card session-toolbar-card">
                     <div class="session-toolbar">
                         <div>
@@ -1046,6 +1277,25 @@
         const errorElement = document.getElementById('error');
         const conversationElement = document.getElementById('conversation');
         const sessionListElement = document.getElementById('session-list');
+        const openRulesButton = document.getElementById('open-rules');
+        const newSkillButton = document.getElementById('new-skill');
+        const skillListElement = document.getElementById('skill-list');
+        const agentConfigCardElement = document.getElementById('agent-config-card');
+        const configTitleElement = document.getElementById('config-title');
+        const configMetaElement = document.getElementById('config-meta');
+        const configModeElement = document.getElementById('config-mode');
+        const configContentElement = document.getElementById('config-content');
+        const configContentLabelElement = document.getElementById('config-content-label');
+        const configStatusElement = document.getElementById('config-status');
+        const configErrorElement = document.getElementById('config-error');
+        const saveConfigButton = document.getElementById('save-config');
+        const deleteSkillButton = document.getElementById('delete-skill');
+        const skillNameFieldElement = document.getElementById('skill-name-field');
+        const skillDescriptionFieldElement = document.getElementById('skill-description-field');
+        const skillEnabledFieldElement = document.getElementById('skill-enabled-field');
+        const skillNameInput = document.getElementById('skill-name-input');
+        const skillDescriptionInput = document.getElementById('skill-description-input');
+        const skillEnabledInput = document.getElementById('skill-enabled-input');
         const layoutElement = document.querySelector('.layout');
         const mainGridElement = document.querySelector('.main-grid');
         const composerContainerElement = document.querySelector('.floating-composer');
@@ -1080,6 +1330,8 @@
         let isRunActive = false;
         let activeRunId = null;
         let activeRunBaseSessionId = null;
+        let currentConfigMode = null;
+        let currentSkillId = null;
 
         if (window.mermaid) {
             window.mermaid.initialize({
@@ -1342,6 +1594,7 @@
                 return '<p class="placeholder">暂无答案。</p>';
             }
             if (window.marked && window.DOMPurify) {
+                window.marked.setOptions({ gfm: true, breaks: false });
                 return window.DOMPurify.sanitize(window.marked.parse(markdownText));
             }
             return `<p>${escapeHtml(markdownText).replaceAll('\n', '<br />')}</p>`;
@@ -1514,6 +1767,203 @@
             renderArtifactList([]);
             resetArtifactEditor();
             artifactPanelElement.open = false;
+        }
+
+        function openConfigPanel(mode) {
+            currentConfigMode = mode;
+            agentConfigCardElement.classList.remove('hidden');
+            configModeElement.textContent = mode === 'rules' ? 'rules' : 'skill';
+            configErrorElement.textContent = '';
+            configStatusElement.textContent = '';
+            skillNameFieldElement.hidden = mode !== 'skill';
+            skillDescriptionFieldElement.hidden = mode !== 'skill';
+            skillEnabledFieldElement.hidden = mode !== 'skill';
+            deleteSkillButton.classList.toggle('hidden', mode !== 'skill' || !currentSkillId);
+            if (mode === 'rules') {
+                configTitleElement.textContent = '全局 Rules';
+                configMetaElement.textContent = '每轮请求都会默认带入这些全局规则。';
+                configContentLabelElement.textContent = 'Rules 内容';
+            } else {
+                configTitleElement.textContent = currentSkillId ? '编辑 Skill' : '新建 Skill';
+                configMetaElement.textContent = 'Skill 是动态上下文，不是可执行工具。';
+                configContentLabelElement.textContent = 'SKILL 内容';
+            }
+        }
+
+        async function loadRules() {
+            openConfigPanel('rules');
+            const response = await fetch('/api/agent/rules');
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || '加载 rules 失败');
+            }
+            currentSkillId = null;
+            configContentElement.value = data.content || '';
+        }
+
+        function renderSkillList(skills) {
+            skillListElement.innerHTML = '';
+            if (!skills.length) {
+                skillListElement.innerHTML = '<div class="placeholder">还没有 skills。</div>';
+                return;
+            }
+
+            skills.forEach((skill) => {
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = `skill-item${skill.skill_id === currentSkillId ? ' active' : ''}`;
+                item.innerHTML = `
+                    <div class="skill-item-head">
+                        <span class="skill-item-title">#${skill.seq} ${escapeHtml(skill.name)}</span>
+                        <span class="skill-item-meta">${skill.enabled ? '启用' : '停用'}</span>
+                    </div>
+                    <div class="skill-item-meta">${escapeHtml(skill.description || '暂无描述')}</div>
+                `;
+                item.addEventListener('click', () => {
+                    void loadSkillDetail(skill.skill_id);
+                });
+                skillListElement.appendChild(item);
+            });
+        }
+
+        async function loadSkills() {
+            const response = await fetch('/api/agent/skills');
+            if (!response.ok) {
+                skillListElement.innerHTML = '<div class="placeholder">加载 skills 失败。</div>';
+                return;
+            }
+            renderSkillList(await response.json());
+        }
+
+        async function loadSkillDetail(skillId) {
+            openConfigPanel('skill');
+            const response = await fetch(`/api/agent/skills/${skillId}`);
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || '加载 skill 失败');
+            }
+            currentSkillId = data.skill_id;
+            skillNameInput.value = data.name || '';
+            skillDescriptionInput.value = data.description || '';
+            skillEnabledInput.checked = Boolean(data.enabled);
+            configContentElement.value = data.content || '';
+            openConfigPanel('skill');
+            await loadSkills();
+        }
+
+        function prepareNewSkill() {
+            currentSkillId = null;
+            skillNameInput.value = '';
+            skillDescriptionInput.value = '';
+            skillEnabledInput.checked = true;
+            configContentElement.value = '';
+            openConfigPanel('skill');
+        }
+
+        function openConfigPanel(mode) {
+            currentConfigMode = mode;
+            agentConfigCardElement.classList.remove('hidden');
+            configModeElement.textContent = mode === 'rules' ? 'rules' : 'skill';
+            configErrorElement.textContent = '';
+            configStatusElement.textContent = '';
+            const showSkillFields = mode === 'skill';
+            skillNameFieldElement.hidden = !showSkillFields;
+            skillDescriptionFieldElement.hidden = !showSkillFields;
+            skillEnabledFieldElement.hidden = !showSkillFields;
+            skillNameFieldElement.classList.toggle('hidden', !showSkillFields);
+            skillDescriptionFieldElement.classList.toggle('hidden', !showSkillFields);
+            skillEnabledFieldElement.classList.toggle('hidden', !showSkillFields);
+            deleteSkillButton.classList.toggle('hidden', !showSkillFields || !currentSkillId);
+
+            if (mode === 'rules') {
+                configTitleElement.textContent = '全局 Rules';
+                configMetaElement.textContent = '每轮请求都会默认带入这些全局规则。';
+                configContentLabelElement.textContent = 'Rules 内容';
+                configContentElement.placeholder = '在这里维护全局规则';
+            } else {
+                configTitleElement.textContent = currentSkillId ? '编辑 Skill' : '新建 Skill';
+                configMetaElement.textContent = 'Skill 是动态上下文，不是可执行工具。';
+                configContentLabelElement.textContent = 'SKILL 内容';
+                configContentElement.placeholder = '在这里维护 skill 内容';
+            }
+        }
+
+        async function loadRules() {
+            currentSkillId = null;
+            skillNameInput.value = '';
+            skillDescriptionInput.value = '';
+            skillEnabledInput.checked = true;
+
+            const response = await fetch('/api/agent/rules');
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || '加载 rules 失败');
+            }
+
+            openConfigPanel('rules');
+            configContentElement.value = data.content || '';
+            await loadSkills();
+        }
+
+        async function saveAgentConfig() {
+            configErrorElement.textContent = '';
+            configStatusElement.textContent = '';
+
+            if (currentConfigMode === 'rules') {
+                const response = await fetch('/api/agent/rules', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content: configContentElement.value }),
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.detail || '保存 rules 失败');
+                }
+                configStatusElement.textContent = 'Rules 已保存';
+                return;
+            }
+
+            if (currentConfigMode === 'skill') {
+                const payload = {
+                    name: skillNameInput.value.trim(),
+                    description: skillDescriptionInput.value.trim(),
+                    content: configContentElement.value,
+                    enabled: skillEnabledInput.checked,
+                };
+                if (!payload.name) {
+                    throw new Error('Skill 名称不能为空');
+                }
+                const url = currentSkillId ? `/api/agent/skills/${currentSkillId}` : '/api/agent/skills';
+                const method = currentSkillId ? 'PUT' : 'POST';
+                const response = await fetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.detail || '保存 skill 失败');
+                }
+                currentSkillId = data.skill_id;
+                configStatusElement.textContent = 'Skill 已保存';
+                openConfigPanel('skill');
+                await loadSkills();
+                return;
+            }
+        }
+
+        async function removeCurrentSkill() {
+            if (!currentSkillId) {
+                return;
+            }
+            const response = await fetch(`/api/agent/skills/${currentSkillId}`, { method: 'DELETE' });
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.detail || '删除 skill 失败');
+            }
+            currentSkillId = null;
+            agentConfigCardElement.classList.add('hidden');
+            await loadSkills();
         }
 
         function renderLogs(logs) {
@@ -2203,6 +2653,28 @@
             }
             await deleteSession(currentSessionId);
         });
+        openRulesButton.addEventListener('click', async () => {
+            try {
+                await loadRules();
+            } catch (error) {
+                configErrorElement.textContent = error.message || '加载 rules 失败';
+            }
+        });
+        newSkillButton.addEventListener('click', prepareNewSkill);
+        saveConfigButton.addEventListener('click', async () => {
+            try {
+                await saveAgentConfig();
+            } catch (error) {
+                configErrorElement.textContent = error.message || '保存失败';
+            }
+        });
+        deleteSkillButton.addEventListener('click', async () => {
+            try {
+                await removeCurrentSkill();
+            } catch (error) {
+                configErrorElement.textContent = error.message || '删除 skill 失败';
+            }
+        });
         toggleHistoryButton.addEventListener('click', toggleHistorySidebar);
 
         attachTrigger.addEventListener('click', () => fileInput.click());
@@ -2300,6 +2772,7 @@
         renderLogs([]);
         renderPendingFiles();
         loadSessions();
+        loadSkills();
     </script>
 </body>
 </html>

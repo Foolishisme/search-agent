@@ -4,7 +4,16 @@ import logging
 import httpx
 
 from app.config import Settings
-from app.schemas import AttachmentContext, CanvasDraft, ConversationMessage, ExecutionPlan, PythonScriptDraft, SearchDecision
+from app.schemas import (
+    AttachmentContext,
+    CanvasDraft,
+    ConversationMessage,
+    ExecutionPlan,
+    PythonScriptDraft,
+    SearchDecision,
+    SkillContext,
+    SkillSummary,
+)
 from app.tool_registry import TOOL_SCHEMAS
 
 logger = logging.getLogger(__name__)
@@ -24,8 +33,10 @@ class DeepSeekClient:
         question: str,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
+        rules_text: str = "",
+        available_skills: list[SkillSummary] | None = None,
     ) -> ExecutionPlan:
-        prompt = self._build_plan_prompt(question, conversation or [], attachments or [])
+        prompt = self._build_plan_prompt(question, conversation or [], attachments or [], rules_text, available_skills or [])
         data = await self._generate_json(prompt)
         try:
             return ExecutionPlan.model_validate(data)
@@ -38,10 +49,20 @@ class DeepSeekClient:
         question: str,
         history: list[dict],
         plan: ExecutionPlan | None = None,
+        rules_text: str = "",
+        selected_skills: list[SkillContext] | None = None,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
     ) -> str:
-        prompt = self._build_search_query_prompt(question, history, plan, conversation or [], attachments or [])
+        prompt = self._build_search_query_prompt(
+            question,
+            history,
+            plan,
+            rules_text,
+            selected_skills or [],
+            conversation or [],
+            attachments or [],
+        )
         data = await self._generate_json(prompt)
         query = str(data.get("query", "")).strip()
         if not query:
@@ -53,10 +74,20 @@ class DeepSeekClient:
         question: str,
         history: list[dict],
         plan: ExecutionPlan | None = None,
+        rules_text: str = "",
+        selected_skills: list[SkillContext] | None = None,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
     ) -> SearchDecision:
-        prompt = self._build_search_assessment_prompt(question, history, plan, conversation or [], attachments or [])
+        prompt = self._build_search_assessment_prompt(
+            question,
+            history,
+            plan,
+            rules_text,
+            selected_skills or [],
+            conversation or [],
+            attachments or [],
+        )
         data = await self._generate_json(prompt)
         try:
             decision = SearchDecision.model_validate(data)
@@ -72,10 +103,20 @@ class DeepSeekClient:
         question: str,
         history: list[dict],
         plan: ExecutionPlan | None = None,
+        rules_text: str = "",
+        selected_skills: list[SkillContext] | None = None,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
     ) -> str:
-        prompt = self._build_final_answer_prompt(question, history, plan, conversation or [], attachments or [])
+        prompt = self._build_final_answer_prompt(
+            question,
+            history,
+            plan,
+            rules_text,
+            selected_skills or [],
+            conversation or [],
+            attachments or [],
+        )
         answer = await self._generate_text(prompt)
         if not answer.strip():
             raise LLMClientError("LLM returned an empty final answer")
@@ -86,10 +127,20 @@ class DeepSeekClient:
         question: str,
         answer: str,
         plan: ExecutionPlan | None = None,
+        rules_text: str = "",
+        selected_skills: list[SkillContext] | None = None,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
     ) -> CanvasDraft:
-        prompt = self._build_canvas_prompt(question, answer, plan, conversation or [], attachments or [])
+        prompt = self._build_canvas_prompt(
+            question,
+            answer,
+            plan,
+            rules_text,
+            selected_skills or [],
+            conversation or [],
+            attachments or [],
+        )
         data = await self._generate_json(prompt)
         try:
             draft = CanvasDraft.model_validate(data)
@@ -106,10 +157,19 @@ class DeepSeekClient:
         self,
         question: str,
         plan: ExecutionPlan | None = None,
+        rules_text: str = "",
+        selected_skills: list[SkillContext] | None = None,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
     ) -> PythonScriptDraft:
-        prompt = self._build_python_script_prompt(question, plan, conversation or [], attachments or [])
+        prompt = self._build_python_script_prompt(
+            question,
+            plan,
+            rules_text,
+            selected_skills or [],
+            conversation or [],
+            attachments or [],
+        )
         data = await self._generate_json(prompt)
         try:
             draft = PythonScriptDraft.model_validate(data)
@@ -121,21 +181,11 @@ class DeepSeekClient:
         return draft
 
     def _serialize_conversation(self, conversation: list[ConversationMessage]) -> str:
-        payload = [
-            {"role": item.role, "content": item.content, "created_at": item.created_at}
-            for item in conversation[-6:]
-        ]
+        payload = [{"role": item.role, "content": item.content, "created_at": item.created_at} for item in conversation[-6:]]
         return json.dumps(payload, ensure_ascii=False)
 
     def _serialize_attachments(self, attachments: list[AttachmentContext]) -> str:
-        payload = [
-            {
-                "filename": item.filename,
-                "media_type": item.media_type,
-                "excerpt": item.excerpt,
-            }
-            for item in attachments
-        ]
+        payload = [{"filename": item.filename, "media_type": item.media_type, "excerpt": item.excerpt} for item in attachments]
         return json.dumps(payload, ensure_ascii=False)
 
     def _serialize_history(self, history: list[dict]) -> str:
@@ -161,25 +211,38 @@ class DeepSeekClient:
             return "null"
         return json.dumps(plan.model_dump(mode="json"), ensure_ascii=False)
 
+    def _serialize_available_skills(self, skills: list[SkillSummary]) -> str:
+        payload = [item.model_dump(mode="json") for item in skills]
+        return json.dumps(payload, ensure_ascii=False)
+
+    def _serialize_selected_skills(self, skills: list[SkillContext]) -> str:
+        payload = [item.model_dump(mode="json") for item in skills]
+        return json.dumps(payload, ensure_ascii=False)
+
     def _build_plan_prompt(
         self,
         question: str,
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
+        rules_text: str,
+        available_skills: list[SkillSummary],
     ) -> str:
         return (
             "You are the planner for a lightweight search agent.\n"
             "Return exactly one JSON object.\n"
-            'Schema: {"route":"direct_answer"|"information_gathering"|"python_execution","canvas_requested":boolean,"rationale":"..."}\n'
+            'Schema: {"route":"direct_answer"|"information_gathering"|"python_execution","canvas_requested":boolean,"selected_skills":["skill-id"],"rationale":"..."}\n'
             "Rules:\n"
             "- route=direct_answer when the user can be answered from general knowledge or the provided conversation/attachments.\n"
             "- route=information_gathering when up-to-date, factual, or externally verified information is needed.\n"
             "- route=python_execution when the user explicitly asks to run Python code, calculate via Python, analyze data with Python, or generate charts through Python execution.\n"
             "- canvas_requested=true only when the user explicitly asks to save, export, generate, or keep a Markdown document/artifact.\n"
             "- Do not request canvas for ordinary Q&A.\n"
-            "- When the user asks about available tools or whether code can be executed, answer according to the available tools listed below.\n"
+            "- selected_skills must be chosen only from the available skill ids listed below.\n"
+            "- Prefer a small set of relevant skills. Leave selected_skills empty when none are useful.\n"
+            f"\nGlobal rules:\n{rules_text or '(empty)'}\n"
             f"\nQuestion: {question}\n"
             f"Available tools: {self._serialize_tools()}\n"
+            f"Available skills: {self._serialize_available_skills(available_skills)}\n"
             f"Conversation: {self._serialize_conversation(conversation)}\n"
             f"Attachments: {self._serialize_attachments(attachments)}"
         )
@@ -189,16 +252,20 @@ class DeepSeekClient:
         question: str,
         history: list[dict],
         plan: ExecutionPlan | None,
+        rules_text: str,
+        selected_skills: list[SkillContext],
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
     ) -> str:
         return (
             "You generate one web search query for a lightweight search agent.\n"
-            "Return exactly one JSON object with schema: {\"query\":\"...\"}.\n"
+            'Return exactly one JSON object with schema: {"query":"..."}.\n'
             "Rules:\n"
             "- Produce a concise query optimized for web search.\n"
             "- If previous search attempts exist, adjust the query instead of repeating the same wording.\n"
             "- Use explicit dates, names, aliases, and time anchors when helpful.\n"
+            f"\nGlobal rules:\n{rules_text or '(empty)'}\n"
+            f"Selected skills: {self._serialize_selected_skills(selected_skills)}\n"
             f"\nQuestion: {question}\n"
             f"Available tools: {self._serialize_tools()}\n"
             f"Current plan: {self._serialize_plan(plan)}\n"
@@ -212,6 +279,8 @@ class DeepSeekClient:
         question: str,
         history: list[dict],
         plan: ExecutionPlan | None,
+        rules_text: str,
+        selected_skills: list[SkillContext],
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
     ) -> str:
@@ -224,6 +293,8 @@ class DeepSeekClient:
             "- next=retry when another search attempt is likely to help materially. Provide a different query.\n"
             "- next=stop when more searching is unlikely to help. The system will answer with available information and may state that public information is insufficient.\n"
             "- Prefer stop over endless retry.\n"
+            f"\nGlobal rules:\n{rules_text or '(empty)'}\n"
+            f"Selected skills: {self._serialize_selected_skills(selected_skills)}\n"
             f"\nQuestion: {question}\n"
             f"Available tools: {self._serialize_tools()}\n"
             f"Current plan: {self._serialize_plan(plan)}\n"
@@ -237,6 +308,8 @@ class DeepSeekClient:
         question: str,
         history: list[dict],
         plan: ExecutionPlan | None,
+        rules_text: str,
+        selected_skills: list[SkillContext],
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
     ) -> str:
@@ -249,6 +322,8 @@ class DeepSeekClient:
             "Do not claim that you have no tools when tools are listed in the prompt.\n"
             "If the user explicitly asks for a simple vector diagram, you may output a fenced ```svg code block containing a complete <svg>...</svg> document.\n"
             "Do not mix raw SVG into ordinary paragraphs. Use the fenced svg block format only.\n"
+            f"\nGlobal rules:\n{rules_text or '(empty)'}\n"
+            f"Selected skills: {self._serialize_selected_skills(selected_skills)}\n"
             f"\nQuestion: {question}\n"
             f"Available tools: {self._serialize_tools()}\n"
             f"Current plan: {self._serialize_plan(plan)}\n"
@@ -262,16 +337,20 @@ class DeepSeekClient:
         question: str,
         answer: str,
         plan: ExecutionPlan | None,
+        rules_text: str,
+        selected_skills: list[SkillContext],
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
     ) -> str:
         return (
             "You are preparing a Markdown artifact for a lightweight search agent.\n"
-            "Return exactly one JSON object with schema: {\"title\":\"...\",\"content\":\"...\"}.\n"
+            'Return exactly one JSON object with schema: {"title":"...","content":"..."}.\n'
             "Rules:\n"
             "- The content must be valid Markdown.\n"
             "- Base the document on the final answer.\n"
             "- Keep the title concise and user-facing.\n"
+            f"\nGlobal rules:\n{rules_text or '(empty)'}\n"
+            f"Selected skills: {self._serialize_selected_skills(selected_skills)}\n"
             f"\nQuestion: {question}\n"
             f"Final answer: {answer}\n"
             f"Available tools: {self._serialize_tools()}\n"
@@ -284,18 +363,22 @@ class DeepSeekClient:
         self,
         question: str,
         plan: ExecutionPlan | None,
+        rules_text: str,
+        selected_skills: list[SkillContext],
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
     ) -> str:
         return (
             "You are preparing Python code for execution inside a lightweight search agent.\n"
-            "Return exactly one JSON object with schema: {\"code\":\"...\",\"rationale\":\"...\"}.\n"
+            'Return exactly one JSON object with schema: {"code":"...","rationale":"..."}.\n'
             "Rules:\n"
             "- Return only valid Python code in the code field.\n"
             "- The code must be self-contained.\n"
             "- Print final results to stdout.\n"
             "- Do not request interactive input.\n"
             "- Prefer standard library unless the task clearly requires something else.\n"
+            f"\nGlobal rules:\n{rules_text or '(empty)'}\n"
+            f"Selected skills: {self._serialize_selected_skills(selected_skills)}\n"
             f"\nQuestion: {question}\n"
             f"Available tools: {self._serialize_tools()}\n"
             f"Current plan: {self._serialize_plan(plan)}\n"
@@ -334,10 +417,7 @@ class DeepSeekClient:
             raise LLMClientError("DEEPSEEK_API_KEY is not configured")
 
         try:
-            client_kwargs = {
-                "timeout": self.settings.llm_request_timeout,
-                "trust_env": False,
-            }
+            client_kwargs = {"timeout": self.settings.llm_request_timeout, "trust_env": False}
             if self.settings.proxy_url:
                 client_kwargs["proxy"] = self.settings.proxy_url
 

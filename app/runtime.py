@@ -3,7 +3,18 @@ from collections.abc import AsyncIterator
 from typing import Any, Callable
 
 from app.llm_client import LLMClientError
-from app.schemas import AskResponse, AttachmentContext, ConversationMessage, RuntimeLog, SearchDecision, SearchResult, ToolCall, ToolObservation
+from app.schemas import (
+    AskResponse,
+    AttachmentContext,
+    ConversationMessage,
+    RuntimeLog,
+    SearchDecision,
+    SearchResult,
+    SkillContext,
+    SkillSummary,
+    ToolCall,
+    ToolObservation,
+)
 from app.search_tool import TavilySearchTool
 from app.tool_registry import ToolExecutionError, ToolExecutor
 
@@ -17,10 +28,18 @@ class RunCancelledError(RuntimeError):
 class AgentRuntime:
     MAX_SEARCH_ATTEMPTS = 3
 
-    def __init__(self, llm_client: Any, search_tool: TavilySearchTool, artifact_store: Any, python_executor: Any | None = None) -> None:
+    def __init__(
+        self,
+        llm_client: Any,
+        search_tool: TavilySearchTool,
+        artifact_store: Any,
+        agent_config_store: Any | None = None,
+        python_executor: Any | None = None,
+    ) -> None:
         self.llm_client = llm_client
         self.search_tool = search_tool
         self.artifact_store = artifact_store
+        self.agent_config_store = agent_config_store
         self.tool_executor = ToolExecutor(search_tool=search_tool, artifact_store=artifact_store, python_executor=python_executor)
 
     async def run(
@@ -61,6 +80,9 @@ class AgentRuntime:
         latest_query: str | None = None
         last_results: list[SearchResult] = []
         latest_nonempty_results: list[SearchResult] = []
+        rules_text = self.agent_config_store.load_rules() if self.agent_config_store is not None else ""
+        available_skills = self.agent_config_store.list_enabled_skill_summaries() if self.agent_config_store is not None else []
+        selected_skills: list[SkillContext] = []
 
         if not normalized_question:
             raise ValueError("Question cannot be empty")
@@ -76,10 +98,19 @@ class AgentRuntime:
         yield {"type": "log", "log": input_log}
 
         ensure_not_cancelled()
-        plan = await self._plan_execution(normalized_question, conversation, attachments, logs)
+        plan = await self._plan_execution(
+            normalized_question,
+            conversation,
+            attachments,
+            logs,
+            rules_text,
+            available_skills,
+        )
+        if self.agent_config_store is not None:
+            selected_skills = self.agent_config_store.load_skill_contexts(plan.selected_skills)
         plan_log = RuntimeLog(
             stage="plan",
-            message=f"Plan route={plan.route}, canvas_requested={plan.canvas_requested}",
+            message=f"Plan route={plan.route}, canvas_requested={plan.canvas_requested}, selected_skills={','.join(plan.selected_skills) or 'none'}",
         )
         logs.append(plan_log)
         yield {"type": "log", "log": plan_log}
@@ -93,6 +124,8 @@ class AgentRuntime:
                     normalized_question,
                     tool_observations,
                     plan,
+                    rules_text,
+                    selected_skills,
                     conversation,
                     attachments,
                     logs,
@@ -118,6 +151,8 @@ class AgentRuntime:
                     normalized_question,
                     tool_observations,
                     plan,
+                    rules_text,
+                    selected_skills,
                     conversation,
                     attachments,
                     logs,
@@ -143,6 +178,8 @@ class AgentRuntime:
             python_log, python_observation = await self._execute_python_step(
                 normalized_question,
                 plan,
+                rules_text,
+                selected_skills,
                 conversation,
                 attachments,
                 logs,
@@ -158,6 +195,8 @@ class AgentRuntime:
             normalized_question,
             tool_observations,
             plan,
+            rules_text,
+            selected_skills,
             conversation,
             attachments,
             logs,
@@ -168,6 +207,8 @@ class AgentRuntime:
                 question=normalized_question,
                 answer=answer,
                 plan=plan,
+                rules_text=rules_text,
+                selected_skills=selected_skills,
                 conversation=conversation,
                 attachments=attachments,
                 session_id=session_id,
@@ -210,9 +251,17 @@ class AgentRuntime:
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
         logs: list[RuntimeLog],
+        rules_text: str,
+        available_skills: list[SkillSummary],
     ):
         try:
-            return await self.llm_client.plan(question, conversation=conversation, attachments=attachments)
+            return await self.llm_client.plan(
+                question,
+                conversation=conversation,
+                attachments=attachments,
+                rules_text=rules_text,
+                available_skills=available_skills,
+            )
         except LLMClientError as exc:
             error_log = RuntimeLog(stage="error", message=f"Planning failed: {exc}")
             logs.append(error_log)
@@ -223,6 +272,8 @@ class AgentRuntime:
         question: str,
         tool_observations: list[ToolObservation],
         plan: Any,
+        rules_text: str,
+        selected_skills: list[SkillContext],
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
         logs: list[RuntimeLog],
@@ -232,6 +283,8 @@ class AgentRuntime:
                 question,
                 [item.model_dump(mode="json") for item in tool_observations],
                 plan=plan,
+                rules_text=rules_text,
+                selected_skills=selected_skills,
                 conversation=conversation,
                 attachments=attachments,
             )
@@ -264,6 +317,8 @@ class AgentRuntime:
         question: str,
         tool_observations: list[ToolObservation],
         plan: Any,
+        rules_text: str,
+        selected_skills: list[SkillContext],
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
         logs: list[RuntimeLog],
@@ -273,6 +328,8 @@ class AgentRuntime:
                 question,
                 [item.model_dump(mode="json") for item in tool_observations],
                 plan=plan,
+                rules_text=rules_text,
+                selected_skills=selected_skills,
                 conversation=conversation,
                 attachments=attachments,
             )
@@ -286,6 +343,8 @@ class AgentRuntime:
         question: str,
         tool_observations: list[ToolObservation],
         plan: Any,
+        rules_text: str,
+        selected_skills: list[SkillContext],
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
         logs: list[RuntimeLog],
@@ -295,6 +354,8 @@ class AgentRuntime:
                 question,
                 [item.model_dump(mode="json") for item in tool_observations],
                 plan=plan,
+                rules_text=rules_text,
+                selected_skills=selected_skills,
                 conversation=conversation,
                 attachments=attachments,
             )
@@ -307,6 +368,8 @@ class AgentRuntime:
         self,
         question: str,
         plan: Any,
+        rules_text: str,
+        selected_skills: list[SkillContext],
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
         logs: list[RuntimeLog],
@@ -315,6 +378,8 @@ class AgentRuntime:
             draft = await self.llm_client.build_python_script(
                 question,
                 plan=plan,
+                rules_text=rules_text,
+                selected_skills=selected_skills,
                 conversation=conversation,
                 attachments=attachments,
             )
@@ -327,10 +392,7 @@ class AgentRuntime:
         logs.append(code_log)
 
         outcome = await self.tool_executor.call(
-            ToolCall(
-                name="execute_python_wsl",
-                arguments={"code": draft.code},
-            ),
+            ToolCall(name="execute_python_wsl", arguments={"code": draft.code}),
             step=500 + len(question),
         )
         result_log = RuntimeLog(
@@ -345,6 +407,8 @@ class AgentRuntime:
         question: str,
         answer: str,
         plan: Any,
+        rules_text: str,
+        selected_skills: list[SkillContext],
         conversation: list[ConversationMessage],
         attachments: list[AttachmentContext],
         session_id: str | None,
@@ -357,6 +421,8 @@ class AgentRuntime:
                 question,
                 answer,
                 plan=plan,
+                rules_text=rules_text,
+                selected_skills=selected_skills,
                 conversation=conversation,
                 attachments=attachments,
             )

@@ -6,7 +6,7 @@ from app.artifact_store import MarkdownArtifactStore
 from app.llm_client import LLMClientError
 from app.python_executor import PythonExecutionResult
 from app.runtime import AgentRuntime, RunCancelledError
-from app.schemas import AttachmentContext, CanvasDraft, ConversationMessage, ExecutionPlan, PythonScriptDraft, SearchDecision, SearchResult
+from app.schemas import AttachmentContext, CanvasDraft, ConversationMessage, ExecutionPlan, PythonScriptDraft, SearchDecision, SearchResult, SkillContext, SkillSummary
 from app.search_tool import SearchToolError
 
 
@@ -31,14 +31,21 @@ class FakeLLMClient:
         self.error = error
         self.histories: list[list[dict]] = []
         self.conversations: list[list[ConversationMessage]] = []
+        self.rules_seen: list[str] = []
+        self.available_skills_seen: list[list[SkillSummary]] = []
+        self.selected_skills_seen: list[list[SkillContext]] = []
 
     async def plan(
         self,
         question: str,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
+        rules_text: str = "",
+        available_skills: list[SkillSummary] | None = None,
     ) -> ExecutionPlan:
         self.conversations.append(list(conversation or []))
+        self.rules_seen.append(rules_text)
+        self.available_skills_seen.append(list(available_skills or []))
         if self.error is not None:
             raise self.error
         return self.plan_result
@@ -48,10 +55,13 @@ class FakeLLMClient:
         question: str,
         history: list[dict],
         plan: ExecutionPlan | None = None,
+        rules_text: str = "",
+        selected_skills: list[SkillContext] | None = None,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
     ) -> str:
         self.histories.append([item.copy() for item in history])
+        self.selected_skills_seen.append(list(selected_skills or []))
         if self.error is not None:
             raise self.error
         if not self.queries:
@@ -63,10 +73,13 @@ class FakeLLMClient:
         question: str,
         history: list[dict],
         plan: ExecutionPlan | None = None,
+        rules_text: str = "",
+        selected_skills: list[SkillContext] | None = None,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
     ) -> SearchDecision:
         self.histories.append([item.copy() for item in history])
+        self.selected_skills_seen.append(list(selected_skills or []))
         if self.error is not None:
             raise self.error
         if not self.decisions:
@@ -78,10 +91,13 @@ class FakeLLMClient:
         question: str,
         history: list[dict],
         plan: ExecutionPlan | None = None,
+        rules_text: str = "",
+        selected_skills: list[SkillContext] | None = None,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
     ) -> str:
         self.histories.append([item.copy() for item in history])
+        self.selected_skills_seen.append(list(selected_skills or []))
         if self.error is not None:
             raise self.error
         return self.final_answer_text
@@ -91,9 +107,12 @@ class FakeLLMClient:
         question: str,
         answer: str,
         plan: ExecutionPlan | None = None,
+        rules_text: str = "",
+        selected_skills: list[SkillContext] | None = None,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
     ) -> CanvasDraft:
+        self.selected_skills_seen.append(list(selected_skills or []))
         if self.error is not None:
             raise self.error
         return self.canvas_draft
@@ -102,12 +121,28 @@ class FakeLLMClient:
         self,
         question: str,
         plan: ExecutionPlan | None = None,
+        rules_text: str = "",
+        selected_skills: list[SkillContext] | None = None,
         conversation: list[ConversationMessage] | None = None,
         attachments: list[AttachmentContext] | None = None,
     ) -> PythonScriptDraft:
+        self.selected_skills_seen.append(list(selected_skills or []))
         if self.error is not None:
             raise self.error
         return self.python_draft
+
+
+class FakeAgentConfigStore:
+    def load_rules(self) -> str:
+        return "Always state uncertainty when public information is limited."
+
+    def list_enabled_skill_summaries(self) -> list[SkillSummary]:
+        return [SkillSummary(seq=1, skill_id="search-1", name="Search", description="Search guidance", enabled=True)]
+
+    def load_skill_contexts(self, skill_ids: list[str]) -> list[SkillContext]:
+        if "search-1" not in skill_ids:
+            return []
+        return [SkillContext(skill_id="search-1", name="Search", description="Search guidance", content="Prefer precise dates.")]
 
 
 class FakeSearchTool:
@@ -191,7 +226,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_information_gathering_then_final(self):
         results = [SearchResult(title="Title", snippet="Snippet", url="https://example.com")]
         llm_client = FakeLLMClient(
-            plan=ExecutionPlan(route="information_gathering", canvas_requested=False),
+            plan=ExecutionPlan(route="information_gathering", canvas_requested=False, selected_skills=["search-1"]),
             queries=["AI Agent runtime"],
             decisions=[SearchDecision(next="answer", reason="enough")],
             final_answer_text="answer from search",
@@ -200,6 +235,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             llm_client=llm_client,
             search_tool=FakeSearchTool(results=[results]),
             artifact_store=self.artifact_store,
+            agent_config_store=FakeAgentConfigStore(),
         )
 
         response = await runtime.run("Tell me about AI Agent runtime")
@@ -210,6 +246,8 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.answer, "answer from search")
         self.assertEqual(llm_client.histories[0], [])
         self.assertEqual(llm_client.histories[1][0]["tool"], "search_web")
+        self.assertIn("uncertainty", llm_client.rules_seen[0])
+        self.assertTrue(llm_client.selected_skills_seen[0])
 
     async def test_search_retry_then_answer(self):
         llm_client = FakeLLMClient(

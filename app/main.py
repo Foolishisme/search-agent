@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from app.agent_config_store import AgentConfigStore, AgentConfigStoreError
 from app.attachment_store import AttachmentStore, AttachmentStoreError
 from app.artifact_store import ArtifactStoreError, MarkdownArtifactStore
 from app.artifact_tool import save_markdown_artifact
@@ -16,7 +17,19 @@ from app.logger import setup_logger
 from app.python_executor import WSLPythonExecutor
 from app.run_manager import RunRegistry, SessionStateGuard
 from app.runtime import AgentRuntime, RunCancelledError
-from app.schemas import ArtifactDetail, ArtifactSummary, AskRequest, AskResponse, SessionDetail, SessionSummary
+from app.schemas import (
+    ArtifactDetail,
+    ArtifactSummary,
+    AskRequest,
+    AskResponse,
+    RulesPayload,
+    SessionDetail,
+    SessionSummary,
+    SkillCreateRequest,
+    SkillDetail,
+    SkillSummary,
+    SkillUpdateRequest,
+)
 from app.session_store import MarkdownSessionStore, SessionStoreError
 from app.search_tool import TavilySearchTool
 
@@ -30,12 +43,14 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "templates")), name="s
 session_store = MarkdownSessionStore(BASE_DIR / "target" / "sessions")
 attachment_store = AttachmentStore(BASE_DIR / "target" / "uploads")
 artifact_store = MarkdownArtifactStore(BASE_DIR / "target" / "artifacts")
+agent_config_store = AgentConfigStore(BASE_DIR / ".agent")
 run_registry = RunRegistry()
 
 runtime = AgentRuntime(
     llm_client=DeepSeekClient(settings),
     search_tool=TavilySearchTool(settings),
     artifact_store=artifact_store,
+    agent_config_store=agent_config_store,
     python_executor=WSLPythonExecutor(
         BASE_DIR / "target" / "temp",
         distro_name=settings.wsl_distro_name,
@@ -283,6 +298,52 @@ async def download_artifact(session_id: str, artifact_id: str) -> FileResponse:
         media_type="text/markdown; charset=utf-8",
         filename=artifact_path.name,
     )
+
+
+@app.get("/api/agent/rules", response_model=RulesPayload)
+async def get_agent_rules() -> RulesPayload:
+    return RulesPayload(content=agent_config_store.load_rules())
+
+
+@app.put("/api/agent/rules", response_model=RulesPayload)
+async def save_agent_rules(payload: RulesPayload) -> RulesPayload:
+    return RulesPayload(content=agent_config_store.save_rules(payload.content))
+
+
+@app.get("/api/agent/skills", response_model=list[SkillSummary])
+async def list_agent_skills() -> list[SkillSummary]:
+    return agent_config_store.list_skills()
+
+
+@app.post("/api/agent/skills", response_model=SkillDetail)
+async def create_agent_skill(payload: SkillCreateRequest) -> SkillDetail:
+    try:
+        return agent_config_store.create_skill(payload)
+    except AgentConfigStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/agent/skills/{skill_id}", response_model=SkillDetail)
+async def get_agent_skill(skill_id: str) -> SkillDetail:
+    detail = agent_config_store.get_skill(skill_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return detail
+
+
+@app.put("/api/agent/skills/{skill_id}", response_model=SkillDetail)
+async def update_agent_skill(skill_id: str, payload: SkillUpdateRequest) -> SkillDetail:
+    try:
+        return agent_config_store.update_skill(skill_id, payload)
+    except AgentConfigStoreError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.delete("/api/agent/skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_agent_skill(skill_id: str) -> Response:
+    if not agent_config_store.delete_skill(skill_id):
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def _json_line(payload: dict) -> str:

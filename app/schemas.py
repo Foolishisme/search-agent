@@ -17,6 +17,7 @@ class SearchResult(BaseModel):
 class ExecutionPlan(BaseModel):
     route: Literal["direct_answer", "information_gathering", "python_execution"]
     canvas_requested: bool = False
+    selected_skills: list[str] = Field(default_factory=list)
     rationale: str | None = None
 
 
@@ -134,3 +135,40 @@ class AskResponse(BaseModel):
     tool_observations: list[ToolObservation] = Field(default_factory=list)
     conversation: list[ConversationMessage] = Field(default_factory=list)
     attachments: list[AttachmentMeta] = Field(default_factory=list)
+
+
+class RulesPayload(BaseModel):
+    content: str = ""
+
+
+class SkillSummary(BaseModel):
+    seq: int
+    skill_id: str
+    name: str
+    description: str
+    enabled: bool = True
+
+
+class SkillDetail(SkillSummary):
+    content: str = ""
+
+
+class SkillCreateRequest(BaseModel):
+    name: str = Field(min_length=1)
+    description: str = ""
+    content: str = ""
+    enabled: bool = True
+
+
+class SkillUpdateRequest(BaseModel):
+    name: str = Field(min_length=1)
+    description: str = ""
+    content: str = ""
+    enabled: bool = True
+
+
+class SkillContext(BaseModel):
+    skill_id: str
+    name: str
+    description: str
+    content: str
