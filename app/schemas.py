@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AskRequest(BaseModel):
@@ -159,12 +159,28 @@ class SkillCreateRequest(BaseModel):
     content: str = ""
     enabled: bool = True
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Skill name cannot be blank")
+        return normalized
+
 
 class SkillUpdateRequest(BaseModel):
     name: str = Field(min_length=1)
     description: str = ""
     content: str = ""
     enabled: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Skill name cannot be blank")
+        return normalized
 
 
 class SkillContext(BaseModel):

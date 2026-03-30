@@ -2,6 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from app.agent_config_store import AgentConfigStore
 from app.schemas import SkillCreateRequest, SkillUpdateRequest
 
@@ -40,3 +42,7 @@ class AgentConfigStoreTests(unittest.TestCase):
 
         self.assertTrue(self.store.delete_skill(created.skill_id))
         self.assertEqual(len(self.store.list_skills()), 1)
+
+    def test_skill_name_cannot_be_blank(self):
+        with self.assertRaises(ValidationError):
+            SkillCreateRequest(name="   ", description="Search guidance", content="Use precise dates.", enabled=True)

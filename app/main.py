@@ -39,7 +39,7 @@ setup_logger(settings.log_level)
 
 app = FastAPI(title="Minimal Search Agent")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "templates")), name="static")
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 session_store = MarkdownSessionStore(BASE_DIR / "target" / "sessions")
 attachment_store = AttachmentStore(BASE_DIR / "target" / "uploads")
 artifact_store = MarkdownArtifactStore(BASE_DIR / "target" / "artifacts")

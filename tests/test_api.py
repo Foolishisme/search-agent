@@ -35,7 +35,7 @@ class ApiTests(unittest.TestCase):
     def test_index_page(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("最小搜索 Agent MVP", response.text)
+        self.assertIn("<!DOCTYPE html>", response.text)
         self.assertIn("cdn.jsdelivr.net/npm/marked/marked.min.js", response.text)
         self.assertIn("cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js", response.text)
         self.assertIn('id="sources"', response.text)
@@ -49,11 +49,11 @@ class ApiTests(unittest.TestCase):
         self.assertIn('id="sources-count-text"', response.text)
         self.assertIn(">发送问题<", response.text)
         self.assertIn("Canvas Tool", response.text)
-        self.assertIn("svg-card", response.text)
-        self.assertIn("copy-message", response.text)
         self.assertIn('id="open-rules"', response.text)
         self.assertIn('id="skill-list"', response.text)
         self.assertIn('id="agent-config-card"', response.text)
+        self.assertIn('/static/css/app.css', response.text)
+        self.assertIn('/static/js/app.js', response.text)
 
     def test_favicon(self):
         response = self.client.get("/favicon.ico")
@@ -103,6 +103,19 @@ class ApiTests(unittest.TestCase):
 
         delete = self.client.delete(f"/api/agent/skills/{skill_id}")
         self.assertEqual(delete.status_code, 204)
+
+    def test_create_skill_rejects_blank_name(self):
+        response = self.client.post(
+            "/api/agent/skills",
+            json={
+                "name": "   ",
+                "description": "Search guidance",
+                "content": "Use precise dates.",
+                "enabled": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
 
     def test_api_ask_success_without_search(self):
         fake_response = AskResponse(
