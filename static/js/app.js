@@ -67,8 +67,8 @@ import { bindCopyButtons, buildExpandableText, buildLogsBlock, buildResultLinkRo
         const downloadArtifactLink = document.getElementById('download-artifact');
 
         let currentSessionId = null;
-        let currentSessionTitle = '???';
-let pendingFiles = [];
+        let currentSessionTitle = '新会话';
+        let pendingFiles = [];
         let latestAnswerMarkdown = '';
         let latestSearchResults = [];
         let currentArtifactId = null;
@@ -127,7 +127,7 @@ let pendingFiles = [];
             isRunActive = false;
             activeRunId = null;
             activeRunBaseSessionId = null;
-            submitButton.textContent = '????';
+            submitButton.textContent = '发送问题';
             submitButton.disabled = false;
         }
 
@@ -157,21 +157,21 @@ let pendingFiles = [];
 
         function updateArtifactEntryButton() {
             const hasArtifacts = currentArtifacts.length > 0;
-            createArtifactButton.textContent = hasArtifacts ? '?? Canvas' : '?? MD';
+            createArtifactButton.textContent = hasArtifacts ? '打开 Canvas' : '生成 MD';
             createArtifactButton.disabled = hasArtifacts
                 ? !currentSessionId
                 : !(currentSessionId && latestAnswerMarkdown.trim());
             artifactSummaryMetaElement.textContent = hasArtifacts
-                ? '??? Markdown ??????????????'
-                : '?????????? Markdown ???';
+                ? '已生成 Markdown 文档，点开可继续编辑或下载。'
+                : '把当前答案转成可编辑 Markdown 文档。';
         }
 
         function updateArtifactPanelState() {
             const activeArtifact = currentArtifacts.find((item) => item.artifact_id === currentArtifactId) || currentArtifacts[0] || null;
-            artifactPanelLabelElement.textContent = activeArtifact ? activeArtifact.title : '??????';
+            artifactPanelLabelElement.textContent = activeArtifact ? activeArtifact.title : '尚未生成文档';
             artifactPanelStatusElement.textContent = activeArtifact
-                ? (isArtifactDirty ? '??????' : '?????????')
-                : '??????????';
+                ? (isArtifactDirty ? '有未保存修改' : '已保存，可继续下载')
+                : '生成后在这里继续修改';
             updateArtifactEntryButton();
         }
 
@@ -179,8 +179,8 @@ let pendingFiles = [];
             isArtifactDirty = Boolean(dirty && currentArtifactId);
             saveArtifactButton.classList.toggle('hidden', !isArtifactDirty);
             artifactSaveStateElement.textContent = currentArtifactId
-                ? (isArtifactDirty ? '??????' : '???')
-                : '??????';
+                ? (isArtifactDirty ? '有未保存修改' : '已保存')
+                : '尚未生成文档';
             updateArtifactPanelState();
         }
 
@@ -247,7 +247,7 @@ let pendingFiles = [];
                 chip.className = 'attachment-chip';
                 chip.innerHTML = `
                     <span>${escapeHtml(file.name)}</span>
-                    <button type="button" class="chip-remove" data-index="${index}">??</button>
+                    <button type="button" class="chip-remove" data-index="${index}">移除</button>
                 `;
                 const removeButton = chip.querySelector('[data-index]');
                 removeButton.addEventListener('click', () => {
@@ -260,12 +260,12 @@ let pendingFiles = [];
         function resetRoundOutput() {
             latestSearchResults = [];
             renderLiveLogs([]);
-            answerElement.innerHTML = '<p class="placeholder">????...</p>';
+            answerElement.innerHTML = '<p class="placeholder">等待提问...</p>';
             hideLiveAnswer();
             sourcesElement.hidden = true;
             sourcesElement.open = false;
             sourcesListElement.innerHTML = '';
-            sourcesCountTextElement.textContent = '0 ???';
+            sourcesCountTextElement.textContent = '0 条来源';
             renderLogs([]);
             statusElement.textContent = '';
             errorElement.textContent = '';
@@ -274,14 +274,14 @@ let pendingFiles = [];
 
         function startNewSession() {
             currentSessionId = null;
-            currentSessionTitle = '???';
+            currentSessionTitle = '新会话';
             questionInput.value = '';
             autosizeQuestionInput();
             pendingFiles = [];
             latestAnswerMarkdown = '';
             latestSearchResults = [];
             currentArtifacts = [];
-            conversationElement.innerHTML = '<div class="placeholder">????????????????????????</div>';
+            conversationElement.innerHTML = '<div class="placeholder">还没有对话记录，发送第一条消息后会自动创建会话。</div>';
             resetRoundOutput();
             setSessionMeta();
             renderSessionAttachments([]);
@@ -525,7 +525,7 @@ let pendingFiles = [];
         function renderTurns(turns = [], latestResults = []) {
             conversationElement.innerHTML = '';
             if (!turns.length) {
-                conversationElement.innerHTML = '<div class="placeholder">???????</div>';
+                conversationElement.innerHTML = '<div class="placeholder">当前会话为空。</div>';
                 return;
             }
 
@@ -535,11 +535,11 @@ let pendingFiles = [];
                 userItem.innerHTML = `
                     <div class="message-role">
                         <div class="message-role-main">
-                            <span>??</span>
+                            <span>用户</span>
                             <span>${escapeHtml(turn.created_at || '')}</span>
                         </div>
                         <div class="message-role-actions">
-                            <button class="copy-message" type="button" data-copy-text="${encodeCopyValue(turn.question || '')}">??</button>
+                            <button class="copy-message" type="button" data-copy-text="${encodeCopyValue(turn.question || '')}">复制</button>
                         </div>
                     </div>
                     <div class="message-content">${escapeHtml(turn.question || '')}</div>
@@ -555,7 +555,7 @@ let pendingFiles = [];
                             <span>${escapeHtml(turn.created_at || '')}</span>
                         </div>
                         <div class="message-role-actions">
-                            <button class="copy-message" type="button" data-copy-text="${encodeCopyValue(turn.answer || '')}">??</button>
+                            <button class="copy-message" type="button" data-copy-text="${encodeCopyValue(turn.answer || '')}">复制</button>
                         </div>
                     </div>
                     <div class="markdown-content">${renderMarkdown(turn.answer || '')}</div>
@@ -564,7 +564,7 @@ let pendingFiles = [];
                 const logsBlock = buildLogsBlock(Array.isArray(turn.logs) ? turn.logs : [], {
                     open: false,
                     className: 'message-logs',
-                    title: '??????',
+                    title: '本轮执行日志',
                 });
                 if (logsBlock) {
                     assistantItem.appendChild(logsBlock);
@@ -586,7 +586,7 @@ let pendingFiles = [];
         function renderConversation(messages, latestResults = []) {
             conversationElement.innerHTML = '';
             if (!messages.length) {
-                conversationElement.innerHTML = '<div class="placeholder">???????</div>';
+                conversationElement.innerHTML = '<div class="placeholder">当前会话为空。</div>';
                 return;
             }
 
@@ -607,11 +607,11 @@ let pendingFiles = [];
                 item.innerHTML = `
                     <div class="message-role">
                         <div class="message-role-main">
-                            <span>${message.role === 'user' ? '??' : 'Assistant'}</span>
+                            <span>${message.role === 'user' ? '用户' : 'Assistant'}</span>
                             <span>${escapeHtml(message.created_at || '')}</span>
                         </div>
                         <div class="message-role-actions">
-                            <button class="copy-message" type="button" data-copy-text="${encodeCopyValue(message.content || '')}">??</button>
+                            <button class="copy-message" type="button" data-copy-text="${encodeCopyValue(message.content || '')}">复制</button>
                         </div>
                     </div>
                     ${renderedContent}
@@ -768,7 +768,7 @@ let pendingFiles = [];
             const baseSessionId = currentSessionId;
             errorElement.textContent = '';
             if (!question) {
-                errorElement.textContent = '?????';
+                errorElement.textContent = '请输入问题';
                 return;
             }
 
@@ -838,7 +838,7 @@ let pendingFiles = [];
                             await loadSessionDetail(data.session_id);
                             statusElement.textContent = data.need_search
                                 ? `已完成，触发搜索：${data.query || ''}`
-                                : '?????????';
+                                : '已完成，未触发搜索';
                             questionInput.value = '';
                             autosizeQuestionInput();
                             pendingFiles = [];
@@ -850,7 +850,7 @@ let pendingFiles = [];
                             } else {
                                 startNewSession();
                             }
-                            statusElement.textContent = event.message || '???????';
+                            statusElement.textContent = event.message || '已停止当前执行';
                             finishActiveRun();
                         } else if (event.type === 'error') {
                             throw new Error(event.message || '发生未知错误');
